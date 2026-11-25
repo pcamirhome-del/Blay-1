@@ -1,0 +1,389 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net: Default-Deny Catch-All
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Hardened Global Primitives
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidRoomCode(code) {
+      return code is string && code.size() >= 4 && code.size() <= 20 && code.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    // Master Gate: Verifies caller is Partner 1 or Partner 2 of the parent room
+    function isRoomMember(roomId) {
+      let room = get(/databases/$(database)/documents/rooms/$(roomId)).data;
+      return room.ownerId == request.auth.uid || room.partner2Id == request.auth.uid;
+    }
+
+    // 3. Entity Validation Blueprints (Anti-Update-Gap)
+    function isValidRoom(data, roomId) {
+      return data.keys().hasAll([
+        'code', 'ownerId', 'partner1Name', 'partner1Mood', 'partner1Points',
+        'partner2Id', 'partner2Name', 'partner2Mood', 'partner2Points',
+        'lastPulseBy', 'lastPulseFromName', 'lastPulseMessage', 'lastPulseAt',
+        'activeCardId', 'activeCardTitle', 'activeCardText', 'activeCardLevel',
+        'activeCardPoints', 'activeCardDrawnBy', 'activeCardFlipped', 'activeCardStage',
+        'wheelOptions', 'wheelSpinAngle', 'wheelSpinning', 'wheelWinner',
+        'wheelSpunBy', 'wheelSpinTimestamp', 'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'code', 'ownerId', 'partner1Name', 'partner1Mood', 'partner1Points',
+        'partner2Id', 'partner2Name', 'partner2Mood', 'partner2Points',
+        'lastPulseBy', 'lastPulseFromName', 'lastPulseMessage', 'lastPulseAt',
+        'activeCardId', 'activeCardTitle', 'activeCardText', 'activeCardLevel',
+        'activeCardPoints', 'activeCardDrawnBy', 'activeCardFlipped', 'activeCardStage',
+        'wheelOptions', 'wheelSpinAngle', 'wheelSpinning', 'wheelWinner',
+        'wheelSpunBy', 'wheelSpinTimestamp', 'createdAt', 'updatedAt'
+      ]) &&
+      data.code is string && data.code.size() >= 4 && data.code.size() <= 20 && data.code == roomId &&
+      data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 &&
+      data.partner1Name is string && data.partner1Name.size() >= 1 && data.partner1Name.size() <= 60 &&
+      data.partner1Mood is string && data.partner1Mood.size() >= 1 && data.partner1Mood.size() <= 60 &&
+      data.partner1Points is int && data.partner1Points >= 0 && data.partner1Points <= 1000000 &&
+      data.partner2Id is string && data.partner2Id.size() >= 0 && data.partner2Id.size() <= 128 &&
+      data.partner2Name is string && data.partner2Name.size() >= 1 && data.partner2Name.size() <= 60 &&
+      data.partner2Mood is string && data.partner2Mood.size() >= 1 && data.partner2Mood.size() <= 60 &&
+      data.partner2Points is int && data.partner2Points >= 0 && data.partner2Points <= 1000000 &&
+      (data.ownerId == request.auth.uid || data.partner2Id == request.auth.uid) &&
+      data.lastPulseBy is string && data.lastPulseBy.size() >= 0 && data.lastPulseBy.size() <= 128 &&
+      data.lastPulseFromName is string && data.lastPulseFromName.size() >= 0 && data.lastPulseFromName.size() <= 60 &&
+      data.lastPulseMessage is string && data.lastPulseMessage.size() >= 0 && data.lastPulseMessage.size() <= 160 &&
+      data.lastPulseAt is int && data.lastPulseAt >= 0 &&
+      data.activeCardId is string && data.activeCardId.size() >= 0 && data.activeCardId.size() <= 128 &&
+      data.activeCardTitle is string && data.activeCardTitle.size() >= 0 && data.activeCardTitle.size() <= 200 &&
+      data.activeCardText is string && data.activeCardText.size() >= 0 && data.activeCardText.size() <= 1000 &&
+      data.activeCardLevel is int && data.activeCardLevel >= 1 && data.activeCardLevel <= 3 &&
+      data.activeCardPoints is int && data.activeCardPoints >= 0 && data.activeCardPoints <= 5000 &&
+      data.activeCardDrawnBy is string && data.activeCardDrawnBy.size() >= 0 && data.activeCardDrawnBy.size() <= 60 &&
+      data.activeCardFlipped is bool &&
+      data.activeCardStage is string && data.activeCardStage.size() >= 1 && data.activeCardStage.size() <= 20 &&
+      data.activeCardStage in ['idle', 'drawn', 'done', 'later'] &&
+      data.wheelOptions is list && data.wheelOptions.size() >= 2 && data.wheelOptions.size() <= 20 &&
+      data.wheelOptions[0] is string && data.wheelOptions[0].size() >= 1 && data.wheelOptions[0].size() <= 120 &&
+      data.wheelSpinAngle is int && data.wheelSpinAngle >= 0 && data.wheelSpinAngle <= 10000000 &&
+      data.wheelSpinning is bool &&
+      data.wheelWinner is string && data.wheelWinner.size() >= 0 && data.wheelWinner.size() <= 120 &&
+      data.wheelSpunBy is string && data.wheelSpunBy.size() >= 0 && data.wheelSpunBy.size() <= 60 &&
+      data.wheelSpinTimestamp is int && data.wheelSpinTimestamp >= 0 &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    function isValidGoal(data, roomId) {
+      return data.keys().hasAll([
+        'roomId', 'authorId', 'authorRole', 'authorName', 'category', 'content',
+        'visibilityMode', 'isRevealed', 'timeframe', 'rewardPoints', 'status',
+        'memberUids', 'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'roomId', 'authorId', 'authorRole', 'authorName', 'category', 'content',
+        'visibilityMode', 'isRevealed', 'timeframe', 'rewardPoints', 'status',
+        'memberUids', 'createdAt', 'updatedAt'
+      ]) &&
+      data.roomId is string && data.roomId.size() >= 4 && data.roomId.size() <= 20 && data.roomId == roomId &&
+      data.authorId is string && data.authorId.size() >= 1 && data.authorId.size() <= 128 &&
+      data.authorRole is string && data.authorRole.size() >= 1 && data.authorRole.size() <= 20 &&
+      data.authorRole in ['partner1', 'partner2'] &&
+      data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 60 &&
+      data.category is string && data.category.size() >= 1 && data.category.size() <= 60 &&
+      data.content is string && data.content.size() >= 1 && data.content.size() <= 1000 &&
+      data.visibilityMode is string && data.visibilityMode.size() >= 1 && data.visibilityMode.size() <= 20 &&
+      data.visibilityMode in ['immediate', 'hidden'] &&
+      data.isRevealed is bool &&
+      data.timeframe is string && data.timeframe.size() >= 1 && data.timeframe.size() <= 60 &&
+      data.rewardPoints is int && data.rewardPoints >= 5 && data.rewardPoints <= 5000 &&
+      data.status is string && data.status.size() >= 1 && data.status.size() <= 20 &&
+      data.status in ['in_progress', 'completed'] &&
+      data.memberUids is list && data.memberUids.size() >= 1 && data.memberUids.size() <= 2 &&
+      data.memberUids[0] is string && data.memberUids[0].size() >= 1 && data.memberUids[0].size() <= 128 &&
+      request.auth.uid in data.memberUids &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    function isValidCustomCard(data, roomId) {
+      return data.keys().hasAll([
+        'roomId', 'authorId', 'authorName', 'level', 'title', 'prompt',
+        'points', 'memberUids', 'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'roomId', 'authorId', 'authorName', 'level', 'title', 'prompt',
+        'points', 'memberUids', 'createdAt', 'updatedAt'
+      ]) &&
+      data.roomId is string && data.roomId.size() >= 4 && data.roomId.size() <= 20 && data.roomId == roomId &&
+      data.authorId is string && data.authorId.size() >= 1 && data.authorId.size() <= 128 &&
+      data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 60 &&
+      data.level is int && data.level >= 1 && data.level <= 3 &&
+      data.title is string && data.title.size() >= 1 && data.title.size() <= 150 &&
+      data.prompt is string && data.prompt.size() >= 1 && data.prompt.size() <= 1000 &&
+      data.points is int && data.points >= 5 && data.points <= 5000 &&
+      data.memberUids is list && data.memberUids.size() >= 1 && data.memberUids.size() <= 2 &&
+      data.memberUids[0] is string && data.memberUids[0].size() >= 1 && data.memberUids[0].size() <= 128 &&
+      request.auth.uid in data.memberUids &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    function isValidReward(data, roomId) {
+      return data.keys().hasAll([
+        'roomId', 'authorId', 'authorName', 'title', 'description',
+        'costPoints', 'iconName', 'redeemedCount', 'lastRedeemedBy',
+        'memberUids', 'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'roomId', 'authorId', 'authorName', 'title', 'description',
+        'costPoints', 'iconName', 'redeemedCount', 'lastRedeemedBy',
+        'memberUids', 'createdAt', 'updatedAt'
+      ]) &&
+      data.roomId is string && data.roomId.size() >= 4 && data.roomId.size() <= 20 && data.roomId == roomId &&
+      data.authorId is string && data.authorId.size() >= 1 && data.authorId.size() <= 128 &&
+      data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 60 &&
+      data.title is string && data.title.size() >= 1 && data.title.size() <= 150 &&
+      data.description is string && data.description.size() >= 1 && data.description.size() <= 600 &&
+      data.costPoints is int && data.costPoints >= 10 && data.costPoints <= 50000 &&
+      data.iconName is string && data.iconName.size() >= 1 && data.iconName.size() <= 40 &&
+      data.redeemedCount is int && data.redeemedCount >= 0 && data.redeemedCount <= 10000 &&
+      data.lastRedeemedBy is string && data.lastRedeemedBy.size() >= 0 && data.lastRedeemedBy.size() <= 60 &&
+      data.memberUids is list && data.memberUids.size() >= 1 && data.memberUids.size() <= 2 &&
+      data.memberUids[0] is string && data.memberUids[0].size() >= 1 && data.memberUids[0].size() <= 128 &&
+      request.auth.uid in data.memberUids &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    // 4. Collection Match Blocks
+    match /rooms/{roomId} {
+      // Allow single-document get if room does not exist yet (availability check), or caller is Partner 1, Partner 2, or room is open for Partner 2
+      allow get: if isVerifiedUser() && isValidRoomCode(roomId) && (
+        resource == null ||
+        existing().ownerId == request.auth.uid ||
+        existing().partner2Id == request.auth.uid ||
+        existing().partner2Id == ""
+      );
+
+      allow list: if false;
+
+      allow create: if isVerifiedUser() &&
+        isValidRoomCode(roomId) &&
+        isValidRoom(incoming(), roomId) &&
+        incoming().ownerId == request.auth.uid &&
+        incoming().partner2Id == "" &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+
+      allow update: if isVerifiedUser() &&
+        isValidRoomCode(roomId) &&
+        isValidRoom(incoming(), roomId) &&
+        incoming().code == existing().code &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          // Action 1: Partner 2 claims empty partner2Id slot via Room Code
+          (
+            existing().partner2Id == "" &&
+            incoming().partner2Id == request.auth.uid &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['partner2Id', 'partner2Name', 'partner2Mood', 'updatedAt'])
+          ) ||
+          // Action 2: Current room member updates mood or display name
+          (
+            (existing().ownerId == request.auth.uid || existing().partner2Id == request.auth.uid) &&
+            incoming().partner2Id == existing().partner2Id &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['partner1Name', 'partner1Mood', 'partner2Name', 'partner2Mood', 'updatedAt'])
+          ) ||
+          // Action 3: Current room member sends a live longing pulse (نبضة شوق)
+          (
+            (existing().ownerId == request.auth.uid || existing().partner2Id == request.auth.uid) &&
+            incoming().partner2Id == existing().partner2Id &&
+            incoming().lastPulseBy == request.auth.uid &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['lastPulseBy', 'lastPulseFromName', 'lastPulseMessage', 'lastPulseAt', 'updatedAt'])
+          ) ||
+          // Action 4: Current room member draws, flips, completes, or postpones a card
+          (
+            (existing().ownerId == request.auth.uid || existing().partner2Id == request.auth.uid) &&
+            incoming().partner2Id == existing().partner2Id &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'activeCardId', 'activeCardTitle', 'activeCardText', 'activeCardLevel',
+              'activeCardPoints', 'activeCardDrawnBy', 'activeCardFlipped', 'activeCardStage',
+              'partner1Points', 'partner2Points', 'updatedAt'
+            ])
+          ) ||
+          // Action 5: Current room member spins or customizes the synchronized wheel
+          (
+            (existing().ownerId == request.auth.uid || existing().partner2Id == request.auth.uid) &&
+            incoming().partner2Id == existing().partner2Id &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'wheelOptions', 'wheelSpinAngle', 'wheelSpinning', 'wheelWinner',
+              'wheelSpunBy', 'wheelSpinTimestamp', 'updatedAt'
+            ])
+          ) ||
+          // Action 6: Current room member earns or redeems Love Points
+          (
+            (existing().ownerId == request.auth.uid || existing().partner2Id == request.auth.uid) &&
+            incoming().partner2Id == existing().partner2Id &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['partner1Points', 'partner2Points', 'updatedAt'])
+          )
+        );
+
+      allow delete: if false;
+
+      // Subcollection 1: Written Goals & Desires Board
+      match /goals/{goalId} {
+        allow get: if isVerifiedUser() && isValidRoomCode(roomId) && isValidId(goalId) && isRoomMember(roomId);
+        allow list: if isVerifiedUser() && request.auth.uid in existing().memberUids;
+
+        allow create: if isVerifiedUser() &&
+          isValidRoomCode(roomId) &&
+          isValidId(goalId) &&
+          isValidGoal(incoming(), roomId) &&
+          incoming().authorId == request.auth.uid &&
+          incoming().status == 'in_progress' &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          isRoomMember(roomId);
+
+        allow update: if isVerifiedUser() &&
+          isValidRoomCode(roomId) &&
+          isValidId(goalId) &&
+          isValidGoal(incoming(), roomId) &&
+          existing().status != 'completed' &&
+          incoming().roomId == existing().roomId &&
+          incoming().authorId == existing().authorId &&
+          incoming().authorRole == existing().authorRole &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time && (
+            // Action 1: Partner reveals hidden goal
+            (
+              incoming().isRevealed == true &&
+              incoming().diff(existing()).affectedKeys().hasOnly(['isRevealed', 'updatedAt'])
+            ) ||
+            // Action 2: Partner marks goal as completed
+            (
+              incoming().status == 'completed' &&
+              incoming().isRevealed == true &&
+              incoming().diff(existing()).affectedKeys().hasOnly(['status', 'isRevealed', 'updatedAt'])
+            ) ||
+            // Action 3: Room member attaches/updates reward points or syncs memberUids
+            (
+              incoming().diff(existing()).affectedKeys().hasOnly(['rewardPoints', 'memberUids', 'updatedAt'])
+            ) ||
+            // Action 4: Author edits goal content or timeframe
+            (
+              existing().authorId == request.auth.uid &&
+              incoming().diff(existing()).affectedKeys().hasOnly(['content', 'timeframe', 'rewardPoints', 'isRevealed', 'memberUids', 'updatedAt'])
+            )
+          ) &&
+          isRoomMember(roomId);
+
+        allow delete: if isVerifiedUser() &&
+          isValidRoomCode(roomId) &&
+          isValidId(goalId) &&
+          existing().authorId == request.auth.uid &&
+          isRoomMember(roomId);
+      }
+
+      // Subcollection 2: Custom Secret Card Creator
+      match /cards/{cardId} {
+        allow get: if isVerifiedUser() && isValidRoomCode(roomId) && isValidId(cardId) && isRoomMember(roomId);
+        allow list: if isVerifiedUser() && request.auth.uid in existing().memberUids;
+
+        allow create: if isVerifiedUser() &&
+          isValidRoomCode(roomId) &&
+          isValidId(cardId) &&
+          isValidCustomCard(incoming(), roomId) &&
+          incoming().authorId == request.auth.uid &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          isRoomMember(roomId);
+
+        allow update: if isVerifiedUser() &&
+          isValidRoomCode(roomId) &&
+          isValidId(cardId) &&
+          isValidCustomCard(incoming(), roomId) &&
+          incoming().roomId == existing().roomId &&
+          incoming().authorId == existing().authorId &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time && (
+            (
+              existing().authorId == request.auth.uid &&
+              incoming().diff(existing()).affectedKeys().hasOnly(['title', 'prompt', 'level', 'points', 'memberUids', 'updatedAt'])
+            ) ||
+            (
+              incoming().diff(existing()).affectedKeys().hasOnly(['memberUids', 'updatedAt'])
+            )
+          ) &&
+          isRoomMember(roomId);
+
+        allow delete: if isVerifiedUser() &&
+          isValidRoomCode(roomId) &&
+          isValidId(cardId) &&
+          existing().authorId == request.auth.uid &&
+          isRoomMember(roomId);
+      }
+
+      // Subcollection 3: Love Points & Rewards Store
+      match /rewards/{rewardId} {
+        allow get: if isVerifiedUser() && isValidRoomCode(roomId) && isValidId(rewardId) && isRoomMember(roomId);
+        allow list: if isVerifiedUser() && request.auth.uid in existing().memberUids;
+
+        allow create: if isVerifiedUser() &&
+          isValidRoomCode(roomId) &&
+          isValidId(rewardId) &&
+          isValidReward(incoming(), roomId) &&
+          incoming().authorId == request.auth.uid &&
+          incoming().redeemedCount == 0 &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          isRoomMember(roomId);
+
+        allow update: if isVerifiedUser() &&
+          isValidRoomCode(roomId) &&
+          isValidId(rewardId) &&
+          isValidReward(incoming(), roomId) &&
+          incoming().roomId == existing().roomId &&
+          incoming().authorId == existing().authorId &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time && (
+            // Action 1: Redeem reward (increment redeemedCount)
+            (
+              incoming().redeemedCount == existing().redeemedCount + 1 &&
+              incoming().diff(existing()).affectedKeys().hasOnly(['redeemedCount', 'lastRedeemedBy', 'updatedAt'])
+            ) ||
+            // Action 2: Sync memberUids when Partner 2 joins
+            (
+              incoming().diff(existing()).affectedKeys().hasOnly(['memberUids', 'updatedAt'])
+            )
+          ) &&
+          isRoomMember(roomId);
+
+        allow delete: if isVerifiedUser() &&
+          isValidRoomCode(roomId) &&
+          isValidId(rewardId) &&
+          existing().authorId == request.auth.uid &&
+          isRoomMember(roomId);
+      }
+    }
+  }
+}

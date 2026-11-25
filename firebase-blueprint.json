@@ -1,0 +1,475 @@
+{
+  "entities": {
+    "CoupleRoom": {
+      "title": "CoupleRoom",
+      "description": "Represents a private real-time synchronized session linking two partners via a Room Code.",
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "Unique alphanumeric room pairing code.",
+          "minLength": 4,
+          "maxLength": 20,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of Partner 1 (room creator).",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "partner1Name": {
+          "type": "string",
+          "description": "Display name of Partner 1.",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "partner1Mood": {
+          "type": "string",
+          "description": "Current live mood of Partner 1.",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "partner1Points": {
+          "type": "integer",
+          "description": "Love points accumulated by Partner 1."
+        },
+        "partner2Id": {
+          "type": "string",
+          "description": "Firebase Auth UID of Partner 2 (empty string until joined).",
+          "minLength": 0,
+          "maxLength": 128
+        },
+        "partner2Name": {
+          "type": "string",
+          "description": "Display name of Partner 2.",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "partner2Mood": {
+          "type": "string",
+          "description": "Current live mood of Partner 2.",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "partner2Points": {
+          "type": "integer",
+          "description": "Love points accumulated by Partner 2."
+        },
+        "lastPulseBy": {
+          "type": "string",
+          "description": "UID of the partner who most recently sent a longing pulse.",
+          "minLength": 0,
+          "maxLength": 128
+        },
+        "lastPulseFromName": {
+          "type": "string",
+          "description": "Display name of the partner who sent the last pulse.",
+          "minLength": 0,
+          "maxLength": 60
+        },
+        "lastPulseMessage": {
+          "type": "string",
+          "description": "Short romantic message attached to the pulse.",
+          "minLength": 0,
+          "maxLength": 160
+        },
+        "lastPulseAt": {
+          "type": "integer",
+          "description": "Epoch timestamp in milliseconds of the last pulse trigger."
+        },
+        "activeCardId": {
+          "type": "string",
+          "description": "ID of the currently drawn card.",
+          "minLength": 0,
+          "maxLength": 128
+        },
+        "activeCardTitle": {
+          "type": "string",
+          "description": "Title of the currently drawn card.",
+          "minLength": 0,
+          "maxLength": 200
+        },
+        "activeCardText": {
+          "type": "string",
+          "description": "Prompt text of the currently drawn card.",
+          "minLength": 0,
+          "maxLength": 1000
+        },
+        "activeCardLevel": {
+          "type": "integer",
+          "description": "Deck level (1, 2, or 3) of the active card."
+        },
+        "activeCardPoints": {
+          "type": "integer",
+          "description": "Reward points for completing the active card."
+        },
+        "activeCardDrawnBy": {
+          "type": "string",
+          "description": "Display name of the partner who drew the card.",
+          "minLength": 0,
+          "maxLength": 60
+        },
+        "activeCardFlipped": {
+          "type": "boolean",
+          "description": "Whether the drawn card is currently flipped face-up on both screens."
+        },
+        "activeCardStage": {
+          "type": "string",
+          "description": "Current stage of the card slot.",
+          "enum": ["idle", "drawn", "done", "later"],
+          "minLength": 1,
+          "maxLength": 20
+        },
+        "wheelOptions": {
+          "type": "array",
+          "description": "List of options on the synchronized spin wheel (max 20)."
+        },
+        "wheelSpinAngle": {
+          "type": "integer",
+          "description": "Target cumulative rotation angle in degrees for synchronized wheel spin."
+        },
+        "wheelSpinning": {
+          "type": "boolean",
+          "description": "Whether the wheel is actively spinning."
+        },
+        "wheelWinner": {
+          "type": "string",
+          "description": "Selected option after the spin finishes.",
+          "minLength": 0,
+          "maxLength": 120
+        },
+        "wheelSpunBy": {
+          "type": "string",
+          "description": "Name of the partner who triggered the wheel spin.",
+          "minLength": 0,
+          "maxLength": 60
+        },
+        "wheelSpinTimestamp": {
+          "type": "integer",
+          "description": "Epoch ms when the wheel spin started."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of room creation."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last room update."
+        }
+      },
+      "required": [
+        "code",
+        "ownerId",
+        "partner1Name",
+        "partner1Mood",
+        "partner1Points",
+        "partner2Id",
+        "partner2Name",
+        "partner2Mood",
+        "partner2Points",
+        "lastPulseBy",
+        "lastPulseFromName",
+        "lastPulseMessage",
+        "lastPulseAt",
+        "activeCardId",
+        "activeCardTitle",
+        "activeCardText",
+        "activeCardLevel",
+        "activeCardPoints",
+        "activeCardDrawnBy",
+        "activeCardFlipped",
+        "activeCardStage",
+        "wheelOptions",
+        "wheelSpinAngle",
+        "wheelSpinning",
+        "wheelWinner",
+        "wheelSpunBy",
+        "wheelSpinTimestamp",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "WrittenGoal": {
+      "title": "WrittenGoal",
+      "description": "A written goal, evening target, or secret desire shared between partners on the live board.",
+      "type": "object",
+      "properties": {
+        "roomId": {
+          "type": "string",
+          "description": "Room code this goal belongs to.",
+          "minLength": 4,
+          "maxLength": 20,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "authorId": {
+          "type": "string",
+          "description": "UID of the partner who wrote the goal.",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "authorRole": {
+          "type": "string",
+          "description": "Partner slot identifier.",
+          "enum": ["partner1", "partner2"],
+          "minLength": 1,
+          "maxLength": 20
+        },
+        "authorName": {
+          "type": "string",
+          "description": "Display name of the goal author.",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "category": {
+          "type": "string",
+          "description": "Goal category or prefix label.",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "content": {
+          "type": "string",
+          "description": "Written goal or desire text.",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "visibilityMode": {
+          "type": "string",
+          "description": "Whether visible immediately or hidden/blurred until revealed.",
+          "enum": ["immediate", "hidden"],
+          "minLength": 1,
+          "maxLength": 20
+        },
+        "isRevealed": {
+          "type": "boolean",
+          "description": "True if the goal is visible or has been revealed by the partner."
+        },
+        "timeframe": {
+          "type": "string",
+          "description": "Target timeframe (e.g. Tonight, This Week).",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "rewardPoints": {
+          "type": "integer",
+          "description": "Points awarded upon completing the goal."
+        },
+        "status": {
+          "type": "string",
+          "description": "Execution status of the goal.",
+          "enum": ["in_progress", "completed"],
+          "minLength": 1,
+          "maxLength": 20
+        },
+        "memberUids": {
+          "type": "array",
+          "description": "Array of authorized partner UIDs in this room (max 2)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when goal was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when goal was last updated."
+        }
+      },
+      "required": [
+        "roomId",
+        "authorId",
+        "authorRole",
+        "authorName",
+        "category",
+        "content",
+        "visibilityMode",
+        "isRevealed",
+        "timeframe",
+        "rewardPoints",
+        "status",
+        "memberUids",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "CustomCard": {
+      "title": "CustomCard",
+      "description": "A secret custom card added by either partner to one of the 3 game levels.",
+      "type": "object",
+      "properties": {
+        "roomId": {
+          "type": "string",
+          "description": "Room code this card belongs to.",
+          "minLength": 4,
+          "maxLength": 20,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "authorId": {
+          "type": "string",
+          "description": "UID of the partner who created the card.",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "authorName": {
+          "type": "string",
+          "description": "Name of the partner who created the card.",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "level": {
+          "type": "integer",
+          "description": "Card deck level: 1 (Romantic), 2 (Fun/Dare), 3 (VIP)."
+        },
+        "title": {
+          "type": "string",
+          "description": "Card header title.",
+          "minLength": 1,
+          "maxLength": 150
+        },
+        "prompt": {
+          "type": "string",
+          "description": "Card challenge or question text.",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "points": {
+          "type": "integer",
+          "description": "Points awarded when card is completed."
+        },
+        "memberUids": {
+          "type": "array",
+          "description": "Authorized partner UIDs in this room (max 2)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when card was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when card was updated."
+        }
+      },
+      "required": [
+        "roomId",
+        "authorId",
+        "authorName",
+        "level",
+        "title",
+        "prompt",
+        "points",
+        "memberUids",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "StoreReward": {
+      "title": "StoreReward",
+      "description": "A custom reward in the couple's Love Points store.",
+      "type": "object",
+      "properties": {
+        "roomId": {
+          "type": "string",
+          "description": "Room code this reward belongs to.",
+          "minLength": 4,
+          "maxLength": 20,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "authorId": {
+          "type": "string",
+          "description": "UID of the partner who added the reward.",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "authorName": {
+          "type": "string",
+          "description": "Display name of the partner who created the reward.",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "title": {
+          "type": "string",
+          "description": "Title of the reward.",
+          "minLength": 1,
+          "maxLength": 150
+        },
+        "description": {
+          "type": "string",
+          "description": "Details of what the reward entails.",
+          "minLength": 1,
+          "maxLength": 600
+        },
+        "costPoints": {
+          "type": "integer",
+          "description": "Love points required to redeem this reward."
+        },
+        "iconName": {
+          "type": "string",
+          "description": "Identifier for the reward icon.",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "redeemedCount": {
+          "type": "integer",
+          "description": "Number of times this reward has been redeemed."
+        },
+        "lastRedeemedBy": {
+          "type": "string",
+          "description": "Display name of the partner who last redeemed this reward.",
+          "minLength": 0,
+          "maxLength": 60
+        },
+        "memberUids": {
+          "type": "array",
+          "description": "Authorized partner UIDs in this room (max 2)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when reward was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when reward was updated."
+        }
+      },
+      "required": [
+        "roomId",
+        "authorId",
+        "authorName",
+        "title",
+        "description",
+        "costPoints",
+        "iconName",
+        "redeemedCount",
+        "lastRedeemedBy",
+        "memberUids",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/rooms/{roomId}": {
+      "schema": { "$ref": "#/entities/CoupleRoom" },
+      "description": "Stores real-time couple room state, partner moods, longing pulses, active 3D card flip state, and synchronized spin wheel state."
+    },
+    "/rooms/{roomId}/goals/{goalId}": {
+      "schema": { "$ref": "#/entities/WrittenGoal" },
+      "description": "Stores live written goals and secret desires for the couple room."
+    },
+    "/rooms/{roomId}/cards/{cardId}": {
+      "schema": { "$ref": "#/entities/CustomCard" },
+      "description": "Stores custom secret cards added by either partner into any of the 3 levels."
+    },
+    "/rooms/{roomId}/rewards/{rewardId}": {
+      "schema": { "$ref": "#/entities/StoreReward" },
+      "description": "Stores custom redeemable rewards in the couple's Love Points store."
+    }
+  }
+}
