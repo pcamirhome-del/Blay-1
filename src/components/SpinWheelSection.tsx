@@ -1,12 +1,22 @@
 import React, { useState } from 'react';
-import { Compass, Plus, RotateCw, Sparkles, Trash2 } from 'lucide-react';
-import { CoupleRoom, PartnerRole } from '../types';
+import {
+  Compass,
+  Heart,
+  Plus,
+  RotateCw,
+  Send,
+  Trash2,
+  X,
+} from 'lucide-react';
+import { CoupleRoom, MOOD_OPTIONS, PartnerRole } from '../types';
 
 interface SpinWheelSectionProps {
   room: CoupleRoom;
   activeRole: PartnerRole;
   onSpinWheel: (targetAngle: number, winner: string) => Promise<void>;
   onUpdateWheelOptions: (newOptions: string[]) => Promise<void>;
+  onUpdateMood: (mood: string) => Promise<void>;
+  onSendPulse: (customMessage?: string) => Promise<void>;
 }
 
 const SEGMENT_COLORS = [
@@ -20,14 +30,22 @@ const SEGMENT_COLORS = [
   '#78350f', // amber-900
 ];
 
+/**
+ * Tab 3 — Synchronized Spin Wheel & Live Mood (عجلة الحظ والمزاج اللحظي):
+ * Fits cleanly inside the 100dvh viewport with zero vertical overflow.
+ */
 export const SpinWheelSection: React.FC<SpinWheelSectionProps> = ({
   room,
   activeRole,
   onSpinWheel,
   onUpdateWheelOptions,
+  onUpdateMood,
+  onSendPulse,
 }) => {
+  const [showOptionsModal, setShowOptionsModal] = useState(false);
   const [newOption, setNewOption] = useState('');
   const [updatingOptions, setUpdatingOptions] = useState(false);
+  const [sendingPulse, setSendingPulse] = useState(false);
 
   const options =
     room.wheelOptions && room.wheelOptions.length >= 2
@@ -35,17 +53,29 @@ export const SpinWheelSection: React.FC<SpinWheelSectionProps> = ({
       : ['مساج رومانسي', 'عشاء على الشموع', 'طلب خاص مجاب', 'اختيار فيلم السهرة'];
 
   const myName = activeRole === 'partner1' ? room.partner1Name : room.partner2Name;
+  const partnerName = activeRole === 'partner1' ? room.partner2Name : room.partner1Name;
+  const myMood = activeRole === 'partner1' ? room.partner1Mood : room.partner2Mood;
+  const partnerMood =
+    activeRole === 'partner1' ? room.partner2Mood : room.partner1Mood;
 
   const handleTriggerSpin = async () => {
     if (room.wheelSpinning || options.length < 2) return;
     const winningIndex = Math.floor(Math.random() * options.length);
     const segmentAngle = 360 / options.length;
-    // Calculate deterministic rotation so pointer at top (0 deg) lands on winningIndex
     const extraSpins = (5 + Math.floor(Math.random() * 3)) * 360;
     const targetSegmentCenter = 360 - (winningIndex * segmentAngle + segmentAngle / 2);
     const currentBase = room.wheelSpinAngle - (room.wheelSpinAngle % 360);
     const nextAngle = Math.round(currentBase + extraSpins + targetSegmentCenter);
     await onSpinWheel(nextAngle, options[winningIndex]);
+  };
+
+  const handleTriggerPulse = async () => {
+    setSendingPulse(true);
+    try {
+      await onSendPulse(`نبضة شوق حية من ${myName} إلى ${partnerName} ❤️`);
+    } finally {
+      setSendingPulse(false);
+    }
   };
 
   const handleAddOption = async (e: React.FormEvent) => {
@@ -72,11 +102,15 @@ export const SpinWheelSection: React.FC<SpinWheelSectionProps> = ({
     }
   };
 
-  // Build SVG wheel slices
   const numSegments = options.length;
   const anglePerSegment = 360 / numSegments;
 
-  const polarToCartesian = (cx: number, cy: number, r: number, angleInDegrees: number) => {
+  const polarToCartesian = (
+    cx: number,
+    cy: number,
+    r: number,
+    angleInDegrees: number
+  ) => {
     const angleInRadians = ((angleInDegrees - 90) * Math.PI) / 180.0;
     return {
       x: cx + r * Math.cos(angleInRadians),
@@ -110,31 +144,39 @@ export const SpinWheelSection: React.FC<SpinWheelSectionProps> = ({
   };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-      {/* Left 7 Columns: Synchronized Spinning Wheel Visual */}
-      <div className="lg:col-span-7 rounded-3xl bg-slate-900/80 backdrop-blur-md border border-rose-500/35 p-5 sm:p-7 shadow-xl flex flex-col items-center text-center">
-        <div className="w-full flex flex-wrap items-center justify-between gap-2 mb-4 text-right">
+    <div className="h-full flex flex-col justify-between gap-2.5 overflow-hidden">
+      {/* Top Section: Synchronized Spin Wheel Card */}
+      <div className="flex-1 min-h-0 rounded-3xl bg-slate-900/80 backdrop-blur-md border border-rose-500/35 p-3.5 sm:p-5 flex flex-col items-center justify-between overflow-hidden">
+        <div className="w-full flex items-center justify-between gap-2 shrink-0">
           <div>
-            <h2 className="text-xl font-bold text-white font-display">
-              عجلة الحظ المشتركة للزوجين
+            <h2 className="text-sm sm:text-base font-bold text-white font-display">
+              عجلة الحظ المشتركة
             </h2>
-            <p className="text-xs text-slate-400 mt-0.5">
-              عند تدوير العجلة من أحد الجهازين، تدور العجلة بنفس الزاوية والنتيجة على شاشة الشريك فوراً
-            </p>
+            {room.wheelWinner && !room.wheelSpinning ? (
+              <p className="text-xs text-amber-300 font-bold leading-snug whitespace-normal break-words">
+                النتيجة: {room.wheelWinner}
+              </p>
+            ) : (
+              <p className="text-[11px] text-slate-400">
+                تدور بنفس اللحظة والنتيجة على الشاشتين
+              </p>
+            )}
           </div>
-          {room.wheelSpunBy && (
-            <span className="text-xs text-amber-300">
-              آخر تدوير: بواسطة {room.wheelSpunBy}
-            </span>
-          )}
+
+          <button
+            type="button"
+            onClick={() => setShowOptionsModal(true)}
+            className="min-h-[44px] px-3 py-1.5 rounded-xl bg-slate-800/90 hover:bg-slate-800 border border-amber-500/40 text-amber-300 text-xs font-bold flex items-center gap-1.5 cursor-pointer shrink-0"
+          >
+            <Compass className="w-3.5 h-3.5 shrink-0" />
+            <span>خيارات العجلة ({options.length})</span>
+          </button>
         </div>
 
-        {/* Top Pointer Indicator */}
-        <div className="relative my-3 flex flex-col items-center">
-          <div className="z-20 -mb-3 w-0 h-0 border-l-[12px] border-l-transparent border-r-[12px] border-r-transparent border-t-[22px] border-t-amber-400 drop-shadow-lg" />
-
-          {/* Rotating SVG Wheel */}
-          <div className="relative w-72 h-72 sm:w-80 sm:h-80 rounded-full p-2 bg-slate-950 border-4 border-rose-500/40 shadow-2xl shadow-rose-500/15">
+        {/* Proportionally Scaled SVG Spinning Wheel */}
+        <div className="relative flex flex-col items-center justify-center my-auto">
+          <div className="z-20 -mb-2.5 w-0 h-0 border-l-[10px] border-l-transparent border-r-[10px] border-r-transparent border-t-[18px] border-t-amber-400 drop-shadow-lg" />
+          <div className="relative w-44 h-44 sm:w-56 sm:h-56 rounded-full p-1.5 bg-slate-950 border-4 border-rose-500/45 shadow-2xl">
             <svg
               viewBox="0 0 320 320"
               className="w-full h-full rounded-full transition-transform duration-[3800ms] ease-[cubic-bezier(0.16,1,0.3,1)]"
@@ -151,20 +193,20 @@ export const SpinWheelSection: React.FC<SpinWheelSectionProps> = ({
                     <path
                       d={createSlicePath(idx)}
                       fill={color}
-                      stroke="#0f172a"
+                      stroke="#090d16"
                       strokeWidth="2"
                     />
                     <text
                       x={textPos.x}
                       y={textPos.y}
                       fill="#ffffff"
-                      fontSize="10"
+                      fontSize="11"
                       fontWeight="bold"
                       textAnchor="middle"
                       alignmentBaseline="middle"
                       transform={`rotate(${midAngle + 90}, ${textPos.x}, ${textPos.y})`}
                     >
-                      {label.length > 16 ? `${label.slice(0, 15)}…` : label}
+                      {label.length > 14 ? `${label.slice(0, 13)}…` : label}
                     </text>
                   </g>
                 );
@@ -172,8 +214,8 @@ export const SpinWheelSection: React.FC<SpinWheelSectionProps> = ({
               <circle
                 cx="160"
                 cy="160"
-                r="26"
-                fill="#0f172a"
+                r="24"
+                fill="#090d16"
                 stroke="#f59e0b"
                 strokeWidth="4"
               />
@@ -181,97 +223,125 @@ export const SpinWheelSection: React.FC<SpinWheelSectionProps> = ({
           </div>
         </div>
 
-        {/* Synchronized Result Banner */}
-        {room.wheelWinner && (
-          <div className="w-full max-w-md rounded-2xl bg-gradient-to-r from-rose-950/60 via-amber-950/40 to-rose-950/60 border border-amber-500/45 px-5 py-3.5 my-3">
-            <p className="text-xs text-amber-300 font-semibold mb-0.5">
-              {room.wheelSpinning
-                ? 'العجلة تدور الآن على الشاشتين...'
-                : `نتيجة عجلة الحظ (أدارها ${room.wheelSpunBy || myName}):`}
-            </p>
-            <p className="text-lg font-bold text-white font-display">
-              {room.wheelSpinning ? 'ترقبوا المفاجأة...' : room.wheelWinner}
-            </p>
-          </div>
-        )}
-
         <button
           type="button"
           disabled={room.wheelSpinning}
           onClick={handleTriggerSpin}
-          className="w-full max-w-sm min-h-[50px] mt-2 rounded-2xl bg-gradient-to-r from-rose-600 to-amber-500 hover:from-rose-500 hover:to-amber-400 text-white font-bold text-sm flex items-center justify-center gap-2 shadow-xl shadow-rose-600/25 transition-all cursor-pointer disabled:opacity-50"
+          className="w-full max-w-sm min-h-[44px] rounded-xl bg-gradient-to-r from-rose-600 to-amber-500 hover:from-rose-500 hover:to-amber-400 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-rose-600/20 transition-all cursor-pointer disabled:opacity-50 shrink-0"
         >
-          <RotateCw className={`w-4 h-4 ${room.wheelSpinning ? 'animate-spin' : ''}`} />
+          <RotateCw className={`w-4 h-4 shrink-0 ${room.wheelSpinning ? 'animate-spin' : ''}`} />
           <span>
             {room.wheelSpinning
-              ? 'جاري الدوران بالمزامنة اللحظية...'
-              : `أدر عجلة الحظ الآن باسم ${myName}`}
+              ? 'العجلة تدور الآن على الشاشتين...'
+              : `أدر عجلة الحظ الآن (${myName})`}
           </span>
         </button>
       </div>
 
-      {/* Right 5 Columns: Customize Wheel Options */}
-      <div className="lg:col-span-5 rounded-3xl bg-slate-900/80 backdrop-blur-md border border-amber-500/35 p-5 sm:p-7 shadow-xl">
-        <div className="flex items-center gap-3 mb-4">
-          <div className="w-10 h-10 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center shrink-0">
-            <Compass className="w-5 h-5 text-amber-400" />
-          </div>
-          <div>
-            <h3 className="text-lg font-bold text-white font-display">
-              تخصيص خيارات العجلة ({options.length}/20)
-            </h3>
-            <p className="text-xs text-slate-400">
-              أضيفا أحكامكما أو رغباتكما الخاصة لتدخل في عجلة الحظ المشتركة
-            </p>
-          </div>
+      {/* Bottom Section: Live Mood Selector + Prominent "إرسال نبضة شوق" Button */}
+      <div className="rounded-3xl bg-slate-900/85 backdrop-blur-md border border-amber-500/35 p-3.5 sm:p-4 space-y-2.5 shrink-0">
+        <div className="flex items-center justify-between gap-2 text-xs">
+          <span className="text-slate-300 font-semibold">
+            مزاجك الآن ({myName}): <strong className="text-rose-300">{myMood}</strong>
+          </span>
+          <span className="text-slate-300 font-semibold">
+            مزاج {partnerName}: <strong className="text-amber-300">{partnerMood}</strong>
+          </span>
         </div>
 
-        <form onSubmit={handleAddOption} className="flex items-center gap-2 mb-5">
-          <input
-            type="text"
-            maxLength={100}
-            value={newOption}
-            onChange={(e) => setNewOption(e.target.value)}
-            placeholder="مثال: مساج قدمين، سهرة سينما..."
-            className="flex-1 min-h-[46px] rounded-xl bg-slate-950 border border-slate-800 px-3.5 text-white placeholder:text-slate-500 focus:outline-none focus:border-amber-500"
-          />
-          <button
-            type="submit"
-            disabled={updatingOptions || !newOption.trim() || options.length >= 20}
-            className="min-h-[46px] px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 shrink-0 cursor-pointer disabled:opacity-50"
-          >
-            <Plus className="w-4 h-4" />
-            <span>إضافة</span>
-          </button>
-        </form>
+        {/* Mood Buttons Grid */}
+        <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5">
+          {MOOD_OPTIONS.map((mood) => {
+            const isSelected = myMood === mood;
+            return (
+              <button
+                key={mood}
+                type="button"
+                onClick={() => onUpdateMood(mood)}
+                className={`min-h-[44px] px-2 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center text-center ${
+                  isSelected
+                    ? 'bg-rose-600 text-white shadow-md shadow-rose-600/25'
+                    : 'bg-slate-950/85 border border-slate-800 text-slate-300 hover:border-rose-500/40'
+                }`}
+              >
+                {mood}
+              </button>
+            );
+          })}
+        </div>
 
-        <div className="space-y-2 max-h-80 overflow-y-auto pl-1">
-          {options.map((opt, idx) => (
-            <div
-              key={`${opt}-${idx}`}
-              className="rounded-xl bg-slate-950/80 border border-slate-800 px-3.5 py-2.5 flex items-center justify-between gap-2"
-            >
-              <div className="flex items-center gap-2.5 min-w-0">
-                <span className="text-xs font-mono font-bold text-amber-400 tabular-nums">
-                  {String(idx + 1).padStart(2, '0')}.
-                </span>
-                <span className="text-xs font-medium text-slate-200 truncate">
-                  {opt}
-                </span>
-              </div>
+        {/* Prominent "إرسال نبضة شوق" Button */}
+        <button
+          type="button"
+          disabled={sendingPulse}
+          onClick={handleTriggerPulse}
+          className="w-full min-h-[46px] rounded-xl bg-gradient-to-r from-rose-600 via-rose-500 to-amber-500 hover:from-rose-500 hover:to-amber-400 active:scale-[0.99] text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-rose-600/30 transition-all cursor-pointer disabled:opacity-50"
+        >
+          <Heart className="w-4 h-4 fill-white shrink-0" />
+          <span>إرسال نبضة شوق فورية إلى {partnerName}</span>
+          <Send className="w-3.5 h-3.5 shrink-0" />
+        </button>
+      </div>
+
+      {/* Modal to Customize Wheel Options */}
+      {showOptionsModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-md p-3 sm:p-5">
+          <div className="w-full max-w-md max-h-[85dvh] flex flex-col rounded-3xl bg-slate-900 border border-amber-500/40 p-5 shadow-2xl overflow-hidden">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-3 shrink-0">
+              <h3 className="text-base font-bold text-white font-display">
+                تخصيص خيارات عجلة الحظ ({options.length}/20)
+              </h3>
               <button
                 type="button"
-                disabled={options.length <= 2 || updatingOptions}
-                onClick={() => handleRemoveOption(idx)}
-                title="حذف الخيار (يجب بقاء خيارين على الأقل)"
-                className="min-h-[34px] min-w-[34px] rounded-lg bg-slate-900 hover:bg-rose-950 text-slate-400 hover:text-rose-300 flex items-center justify-center transition-colors cursor-pointer disabled:opacity-30"
+                onClick={() => setShowOptionsModal(false)}
+                className="min-h-[44px] min-w-[44px] rounded-xl bg-slate-800 text-slate-300 hover:text-white flex items-center justify-center cursor-pointer"
               >
-                <Trash2 className="w-3.5 h-3.5" />
+                <X className="w-5 h-5" />
               </button>
             </div>
-          ))}
+
+            <form onSubmit={handleAddOption} className="flex items-center gap-2 mb-3 shrink-0">
+              <input
+                type="text"
+                maxLength={100}
+                value={newOption}
+                onChange={(e) => setNewOption(e.target.value)}
+                placeholder="أضف حكماً أو رغبة جديدة..."
+                className="flex-1 min-h-[44px] rounded-xl bg-slate-950 border border-slate-800 px-3 text-white placeholder:text-slate-500 focus:outline-none focus:border-amber-500"
+              />
+              <button
+                type="submit"
+                disabled={updatingOptions || !newOption.trim() || options.length >= 20}
+                className="min-h-[44px] px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center gap-1 shrink-0 cursor-pointer disabled:opacity-50"
+              >
+                <Plus className="w-4 h-4 shrink-0" />
+                <span>إضافة</span>
+              </button>
+            </form>
+
+            <div className="overflow-y-auto custom-scroll space-y-2">
+              {options.map((opt, idx) => (
+                <div
+                  key={`${opt}-${idx}`}
+                  className="rounded-xl bg-slate-950 border border-slate-800 px-3.5 py-2.5 flex items-center justify-between gap-2"
+                >
+                  <span className="text-xs font-medium text-slate-200 whitespace-normal break-words">
+                    {idx + 1}. {opt}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={options.length <= 2 || updatingOptions}
+                    onClick={() => handleRemoveOption(idx)}
+                    className="min-h-[44px] min-w-[44px] rounded-xl bg-slate-900 hover:bg-rose-950 text-slate-400 hover:text-rose-300 flex items-center justify-center cursor-pointer disabled:opacity-30 shrink-0"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };

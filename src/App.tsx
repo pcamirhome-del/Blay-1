@@ -18,6 +18,7 @@ import {
   updateDoc,
   where,
 } from 'firebase/firestore';
+import { onValue, ref as rtdbRef, set as rtdbSet } from 'firebase/database';
 import confetti from 'canvas-confetti';
 import {
   Clock,
@@ -26,7 +27,7 @@ import {
   Heart,
   Layers,
   Lock,
-  LogOut,
+  Settings,
   Target,
 } from 'lucide-react';
 import {
@@ -35,8 +36,10 @@ import {
   googleProvider,
   handleFirestoreError,
   OperationType,
+  rtdb,
   triggerActionChime,
   triggerPulseAlert,
+  uploadSharedBackgroundMedia,
 } from './firebase';
 import {
   CoupleRoom,
@@ -45,29 +48,32 @@ import {
   DEFAULT_DECK_CARDS,
   DEFAULT_STORE_REWARDS,
   DEFAULT_WHEEL_OPTIONS,
+  MediaChunkDoc,
   PartnerRole,
   StoreReward,
   WrittenGoal,
 } from './types';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { OfflineIndicator, PWAInstallButton } from './components/PWAInstallPrompt';
+import { OfflineIndicator } from './components/PWAInstallPrompt';
 import { PinLockScreen } from './components/PinLockScreen';
 import { RoomPairingModal } from './components/RoomPairingModal';
-import { MoodAndPulseBar } from './components/MoodAndPulseBar';
+import { LiveMediaBackground } from './components/LiveMediaBackground';
+import { SettingsModal } from './components/SettingsModal';
 import { WrittenGoalsBoard } from './components/WrittenGoalsBoard';
 import { CardDeckSection } from './components/CardDeckSection';
 import { SpinWheelSection } from './components/SpinWheelSection';
 import { RewardsStoreSection } from './components/RewardsStoreSection';
 
-const PIN_STORAGE_KEY = 'nabd_couple_pin_v1';
+const PIN_STORAGE_KEY = 'nabd_couple_stealth_pin_v2';
 const ROOM_STORAGE_KEY = 'nabd_couple_room_code_v1';
 const ROLE_STORAGE_KEY = 'nabd_couple_partner_role_v1';
 
 export default function App() {
-  // 1. Local 4-Digit PIN Lock State
-  const [savedPin, setSavedPin] = useState<string | null>(() =>
-    localStorage.getItem(PIN_STORAGE_KEY)
-  );
+  // 1. Ultra-Private Stealth Lock Screen State (Default PIN: '0000')
+  const [savedPin, setSavedPin] = useState<string>(() => {
+    const stored = localStorage.getItem(PIN_STORAGE_KEY);
+    return stored && stored.length === 4 ? stored : '0000';
+  });
   const [isUnlocked, setIsUnlocked] = useState<boolean>(false);
 
   // 2. Live 12-Hour Digital Clock in Header
@@ -88,20 +94,25 @@ export default function App() {
   const [roomError, setRoomError] = useState<string>('');
   const [isSubmittingRoom, setIsSubmittingRoom] = useState<boolean>(false);
 
-  // 4. Real-Time Subcollections State
+  // 4. Real-Time Subcollections & Reassembled Media State
   const [goals, setGoals] = useState<WrittenGoal[]>([]);
   const [customCards, setCustomCards] = useState<CustomCard[]>([]);
   const [rewards, setRewards] = useState<StoreReward[]>([]);
+  const [mediaChunks, setMediaChunks] = useState<MediaChunkDoc[]>([]);
+  const [reassembledMediaUrl, setReassembledMediaUrl] = useState<string>('');
 
-  // 5. Navigation Tab & Live Notifications
-  const [activeTab, setActiveTab] = useState<'goals' | 'cards' | 'wheel' | 'rewards'>('goals');
+  // 5. Navigation Tabs (4 Full-Screen Mobile Tabs) & Modals
+  const [activeTab, setActiveTab] = useState<'goals' | 'cards' | 'wheel' | 'rewards'>(
+    'goals'
+  );
+  const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [liveToast, setLiveToast] = useState<string | null>(null);
   const [showPulseOverlay, setShowPulseOverlay] = useState<boolean>(false);
 
   const lastSeenPulseRef = useRef<number>(0);
   const lastSeenGoalCountRef = useRef<number>(0);
 
-  // Update 12-Hour Live Digital Clock every second
+  // Live 12-Hour Digital Clock
   useEffect(() => {
     const updateClock = () => {
       const now = new Date();
@@ -118,7 +129,7 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
 
-  // Listen to Firebase Auth State
+  // Firebase Auth Listener
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
@@ -131,16 +142,17 @@ export default function App() {
     setLiveToast(msg);
     setTimeout(() => {
       setLiveToast((prev) => (prev === msg ? null : prev));
-    }, 4500);
+    }, 4000);
   };
 
-  // Attach Real-Time Firestore Listeners when User + RoomCode are active
+  // Real-Time Firestore & Realtime Database Listeners
   useEffect(() => {
     if (!authReady || !user || !roomCode) {
       setRoom(null);
       setGoals([]);
       setCustomCards([]);
       setRewards([]);
+      setMediaChunks([]);
       return;
     }
 
@@ -154,10 +166,16 @@ export default function App() {
           setRoom(null);
           return;
         }
-        const data = snap.data() as CoupleRoom;
+        const raw = snap.data() as CoupleRoom;
+        const data: CoupleRoom = {
+          ...raw,
+          bgUrl: raw.bgUrl ?? '',
+          bgType: raw.bgType ?? 'none',
+          bgOverlayOpacity: raw.bgOverlayOpacity ?? 65,
+        };
         setRoom(data);
 
-        // Automatically detect if a new longing pulse arrived
+        // Longing Pulse Detection
         if (
           data.lastPulseAt &&
           lastSeenPulseRef.current > 0 &&
@@ -170,7 +188,7 @@ export default function App() {
           lastSeenPulseRef.current = data.lastPulseAt;
         }
 
-        // Stop wheel spinning flag after 4 seconds of animation
+        // Stop wheel spinning flag after animation settles
         if (
           data.wheelSpinning &&
           data.wheelSpinTimestamp &&
@@ -186,6 +204,26 @@ export default function App() {
         handleFirestoreError(error, OperationType.GET, roomPath);
       }
     );
+
+    // Optional Realtime Database listener for instant background broadcast if configured
+    let unsubRtdb: (() => void) | null = null;
+    if (rtdb) {
+      const bgRef = rtdbRef(rtdb, `rooms/${roomCode}/background`);
+      unsubRtdb = onValue(bgRef, (snapshot) => {
+        const val = snapshot.val();
+        if (val && typeof val.bgUrl === 'string') {
+          setRoom((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  bgUrl: val.bgUrl,
+                  bgType: val.bgType || prev.bgType,
+                }
+              : prev
+          );
+        }
+      });
+    }
 
     // Subcollection 1: Written Goals
     const goalsPath = `rooms/${roomCode}/goals`;
@@ -215,8 +253,8 @@ export default function App() {
             triggerActionChime();
             showToastMessage(
               newest.visibilityMode === 'immediate'
-                ? `هدف جديد من ${newest.authorName}: «${newest.content.slice(0, 45)}...»`
-                : `أضاف ${newest.authorName} هدفاً مخفياً / مفاجأة جديدة على اللوحة!`
+                ? `هدف جديد من ${newest.authorName}: «${newest.content.slice(0, 45)}»`
+                : `أضاف ${newest.authorName} هدفاً مخفياً / مفاجأة جديدة!`
             );
           }
         }
@@ -228,7 +266,7 @@ export default function App() {
       }
     );
 
-    // Subcollection 2: Custom Secret Cards
+    // Subcollection 2: Custom Cards
     const cardsPath = `rooms/${roomCode}/cards`;
     const cardsQuery = query(
       collection(db, 'rooms', roomCode, 'cards'),
@@ -268,15 +306,56 @@ export default function App() {
       }
     );
 
+    // Subcollection 4: Synchronized Background Media Chunks (for video/GIF clips)
+    const mediaPath = `rooms/${roomCode}/media`;
+    const mediaQuery = query(
+      collection(db, 'rooms', roomCode, 'media'),
+      where('memberUids', 'array-contains', user.uid)
+    );
+    const unsubMedia = onSnapshot(
+      mediaQuery,
+      (snap) => {
+        const list: MediaChunkDoc[] = snap.docs.map((d) => ({
+          id: d.id,
+          ...(d.data() as Omit<MediaChunkDoc, 'id'>),
+        }));
+        list.sort((a, b) => a.index - b.index);
+        setMediaChunks(list);
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.LIST, mediaPath);
+      }
+    );
+
     return () => {
       unsubRoom();
+      if (unsubRtdb) unsubRtdb();
       unsubGoals();
       unsubCards();
       unsubRewards();
+      unsubMedia();
     };
   }, [authReady, user, roomCode]);
 
-  // Automatically synchronize Partner 2's UID into existing goals/cards/rewards when Partner 2 joins
+  // Reassemble chunked video/GIF media into a live playable Blob URL when bgUrl starts with CHUNKED_MEDIA:
+  useEffect(() => {
+    if (!room?.bgUrl) {
+      setReassembledMediaUrl('');
+      return;
+    }
+    if (!room.bgUrl.startsWith('CHUNKED_MEDIA:')) {
+      setReassembledMediaUrl(room.bgUrl);
+      return;
+    }
+    if (mediaChunks.length === 0) return;
+    const expectedTotal = mediaChunks[0].total;
+    if (mediaChunks.length < expectedTotal) return;
+
+    const fullDataUrl = mediaChunks.map((c) => c.data).join('');
+    setReassembledMediaUrl(fullDataUrl);
+  }, [room?.bgUrl, mediaChunks]);
+
+  // Automatically synchronize Partner 2's UID into subcollection documents when Partner 2 joins
   useEffect(() => {
     if (!room || !user || !room.partner2Id || room.partner2Id === room.ownerId) {
       return;
@@ -307,19 +386,30 @@ export default function App() {
         }).catch(() => {});
       }
     });
-  }, [room?.partner2Id, room?.ownerId, room?.code, user, goals, customCards, rewards]);
+    mediaChunks.forEach((m) => {
+      if (!m.memberUids.includes(room.partner2Id)) {
+        updateDoc(doc(db, 'rooms', room.code, 'media', m.id), {
+          memberUids: bothUids,
+          updatedAt: serverTimestamp(),
+        }).catch(() => {});
+      }
+    });
+  }, [
+    room?.partner2Id,
+    room?.ownerId,
+    room?.code,
+    user,
+    goals,
+    customCards,
+    rewards,
+    mediaChunks,
+  ]);
 
-  const handleUnlockPin = (pin: string) => {
-    if (!savedPin) {
-      localStorage.setItem(PIN_STORAGE_KEY, pin);
-      setSavedPin(pin);
-    }
-    setIsUnlocked(true);
-  };
-
-  const handleResetPin = () => {
-    localStorage.removeItem(PIN_STORAGE_KEY);
-    setSavedPin(null);
+  const handleChangePin = (newPin: string) => {
+    localStorage.setItem(PIN_STORAGE_KEY, newPin);
+    setSavedPin(newPin);
+    triggerActionChime();
+    showToastMessage('تم تحديث رمز شاشة القفل السرية بنجاح');
   };
 
   const handleSwitchRole = (role: PartnerRole) => {
@@ -340,6 +430,13 @@ export default function App() {
     } finally {
       setAuthLoading(false);
     }
+  };
+
+  const getRoomMemberUids = (): string[] => {
+    if (!room || !user) return [];
+    const set = new Set<string>([room.ownerId, user.uid]);
+    if (room.partner2Id) set.add(room.partner2Id);
+    return Array.from(set).slice(0, 2);
   };
 
   const handleCreateRoom = async (
@@ -400,6 +497,9 @@ export default function App() {
         wheelWinner: '',
         wheelSpunBy: '',
         wheelSpinTimestamp: 0,
+        bgUrl: '',
+        bgType: 'none',
+        bgOverlayOpacity: 65,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       };
@@ -444,7 +544,7 @@ export default function App() {
         updatedAt: serverTimestamp(),
       });
 
-      // Seed default couple rewards store items
+      // Seed default couple rewards
       const rewardsCol = collection(db, 'rooms', code, 'rewards');
       for (const item of DEFAULT_STORE_REWARDS) {
         await addDoc(rewardsCol, {
@@ -519,7 +619,61 @@ export default function App() {
     setRoom(null);
   };
 
-  // Feature 2: Update Mood & Send Pulse
+  // Shared Live Background Handlers
+  const handleUploadBackground = async (
+    file: File,
+    onProgress: (pct: number) => void
+  ) => {
+    if (!room || !user) return;
+    await uploadSharedBackgroundMedia({
+      file,
+      roomCode: room.code,
+      authorUid: user.uid,
+      memberUids: getRoomMemberUids(),
+      onProgress,
+    });
+    triggerActionChime();
+    showToastMessage('تم تحديث الخلفية الحية على شاشتيكما معاً!');
+  };
+
+  const handleUpdateOverlayOpacity = async (opacity: number) => {
+    if (!room) return;
+    const path = `rooms/${room.code}`;
+    try {
+      await updateDoc(doc(db, 'rooms', room.code), {
+        bgOverlayOpacity: opacity,
+        updatedAt: serverTimestamp(),
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, path);
+    }
+  };
+
+  const handleResetBackground = async () => {
+    if (!room) return;
+    const path = `rooms/${room.code}`;
+    try {
+      await updateDoc(doc(db, 'rooms', room.code), {
+        bgUrl: '',
+        bgType: 'none',
+        bgOverlayOpacity: 65,
+        updatedAt: serverTimestamp(),
+      });
+      if (rtdb) {
+        rtdbSet(rtdbRef(rtdb, `rooms/${room.code}/background`), {
+          bgUrl: '',
+          bgType: 'none',
+          updatedAt: Date.now(),
+        }).catch(() => {});
+      }
+      triggerActionChime();
+      showToastMessage('تمت استعادة الخلفية الرومانسية الافتراضية على الجهازين');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, path);
+    }
+  };
+
+  // Mood & Longing Pulse Handlers
   const handleUpdateMood = async (mood: string) => {
     if (!room || !user) return;
     const path = `rooms/${room.code}`;
@@ -530,7 +684,7 @@ export default function App() {
           : { partner2Mood: mood, updatedAt: serverTimestamp() };
       await updateDoc(doc(db, 'rooms', room.code), updatePayload);
       triggerActionChime();
-      showToastMessage(`تم تحديث حالتك المزاجية إلى «${mood}» على الشاشتين`);
+      showToastMessage(`تم تحديث حالتك المزاجية إلى «${mood}»`);
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, path);
     }
@@ -545,8 +699,7 @@ export default function App() {
       await updateDoc(doc(db, 'rooms', room.code), {
         lastPulseBy: user.uid,
         lastPulseFromName: senderName,
-        lastPulseMessage:
-          (customMessage || 'أشتاق إليك الآن!').slice(0, 160),
+        lastPulseMessage: (customMessage || 'أشتاق إليك الآن!').slice(0, 160),
         lastPulseAt: Date.now(),
         updatedAt: serverTimestamp(),
       });
@@ -557,14 +710,7 @@ export default function App() {
     }
   };
 
-  // Feature 1: Written Goals & Desires Handlers
-  const getRoomMemberUids = (): string[] => {
-    if (!room || !user) return [];
-    const set = new Set<string>([room.ownerId, user.uid]);
-    if (room.partner2Id) set.add(room.partner2Id);
-    return Array.from(set).slice(0, 2);
-  };
-
+  // Written Goals Handlers
   const handleAddGoal = async (goalInput: {
     category: string;
     content: string;
@@ -675,14 +821,13 @@ export default function App() {
     }
   };
 
-  // Feature 3 & 4: Interactive 3-Level Card Deck & Custom Secret Card Creator
+  // Card Deck Handlers
   const handleDrawCard = async (card: DeckCardItem) => {
     if (!room) return;
     const path = `rooms/${room.code}`;
     const drawnBy =
       activeRole === 'partner1' ? room.partner1Name : room.partner2Name;
     try {
-      // First flip face-down briefly, then flip face-up for 3D effect on both screens
       await updateDoc(doc(db, 'rooms', room.code), {
         activeCardId: card.id,
         activeCardTitle: card.title.slice(0, 200),
@@ -783,7 +928,7 @@ export default function App() {
         updatedAt: serverTimestamp(),
       });
       triggerActionChime();
-      showToastMessage('تمت إضافة بطاقتك الخاصة إلى صندوق البطاقات بنجاح!');
+      showToastMessage('تم حفظ البطاقة في الصندوق الخاص!');
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, path);
     }
@@ -799,7 +944,7 @@ export default function App() {
     }
   };
 
-  // Feature 5: Synchronized Spin Wheel Handlers
+  // Spin Wheel Handlers
   const handleSpinWheel = async (targetAngle: number, winner: string) => {
     if (!room) return;
     const path = `rooms/${room.code}`;
@@ -834,7 +979,7 @@ export default function App() {
     }
   };
 
-  // Feature 6: Love Points & Rewards Store Handlers
+  // Store Rewards Handlers
   const handleAddReward = async (input: {
     title: string;
     description: string;
@@ -916,16 +1061,14 @@ export default function App() {
     }
   };
 
-  // Gate 1: Local 4-Digit PIN Lock Screen
+  // Gate 1: Ultra-Private Stealth Lock Screen (Floating Hearts & Kisses only, ZERO text)
   if (!isUnlocked) {
     return (
       <ErrorBoundary>
         <PinLockScreen
           savedPin={savedPin}
-          onUnlock={handleUnlockPin}
-          onResetPin={handleResetPin}
+          onUnlock={() => setIsUnlocked(true)}
         />
-        <OfflineIndicator />
       </ErrorBoundary>
     );
   }
@@ -934,121 +1077,118 @@ export default function App() {
     <ErrorBoundary>
       <div
         dir="rtl"
-        className="min-h-screen bg-[#0f172a] text-slate-100 flex flex-col justify-between relative overflow-x-hidden"
+        className="relative h-[100dvh] w-screen overflow-hidden flex flex-col justify-between select-none"
       >
-        {/* Subtle romantic atmospheric background glow */}
-        <div className="pointer-events-none fixed -top-40 right-1/4 w-[28rem] h-[28rem] rounded-full bg-rose-500/10 blur-3xl" />
-        <div className="pointer-events-none fixed top-1/2 left-1/4 w-[26rem] h-[26rem] rounded-full bg-amber-500/8 blur-3xl" />
+        {/* Fixed Full-Screen Shared Live Media Background (Video / Photo / GIF + Dimming Overlay) */}
+        <LiveMediaBackground
+          mediaUrl={reassembledMediaUrl}
+          mediaType={room?.bgType || 'none'}
+          overlayOpacity={room?.bgOverlayOpacity ?? 65}
+        />
 
-        {/* Top Header Bar: 3 Zones (Brand, Nav Tabs, Live 12-Hour Clock & Lock) */}
-        <header className="sticky top-0 z-30 bg-slate-950/85 backdrop-blur-md border-b border-rose-500/25 px-4 sm:px-8 py-3">
-          <div className="max-w-7xl mx-auto flex items-center justify-between gap-4 sm:gap-8">
-            {/* Zone 1: Single-line Brand Title */}
-            <a
-              href="#top"
-              className="text-lg sm:text-xl font-bold text-white font-display tracking-tight whitespace-nowrap shrink-0 flex items-center gap-2"
-            >
-              <Heart className="w-5 h-5 text-rose-500 fill-rose-500 shrink-0" />
-              <span>نبض القلوب</span>
-            </a>
-
-            {/* Zone 2: Section Navigation Links (Desktop) */}
-            {room && (
-              <nav className="hidden md:flex items-center gap-6 text-sm font-semibold text-slate-300">
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('goals')}
-                  className={`py-1 border-b-2 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                    activeTab === 'goals'
-                      ? 'border-rose-500 text-white'
-                      : 'border-transparent text-slate-400 hover:text-white'
-                  }`}
-                >
-                  الأهداف والأمنيات
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('cards')}
-                  className={`py-1 border-b-2 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                    activeTab === 'cards'
-                      ? 'border-rose-500 text-white'
-                      : 'border-transparent text-slate-400 hover:text-white'
-                  }`}
-                >
-                  بطاقات الرومانسية
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('wheel')}
-                  className={`py-1 border-b-2 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                    activeTab === 'wheel'
-                      ? 'border-rose-500 text-white'
-                      : 'border-transparent text-slate-400 hover:text-white'
-                  }`}
-                >
-                  عجلة الحظ
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('rewards')}
-                  className={`py-1 border-b-2 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                    activeTab === 'rewards'
-                      ? 'border-rose-500 text-white'
-                      : 'border-transparent text-slate-400 hover:text-white'
-                  }`}
-                >
-                  متجر المكافآت
-                </button>
-              </nav>
-            )}
-
-            {/* Zone 3: Live 12-Hour Digital Clock + PWA Install + PIN Lock */}
-            <div className="flex items-center gap-2.5 shrink-0">
-              <div
-                className="flex items-center gap-1.5 rounded-xl bg-slate-900/90 border border-slate-800 px-3 py-1.5 text-xs font-mono font-bold text-amber-300 tabular-nums whitespace-nowrap shrink-0"
-                title="الساعة الرقمية الحية (نظام ١٢ ساعة)"
-              >
-                <Clock className="w-3.5 h-3.5 text-rose-400 shrink-0" />
-                <span dir="ltr">{clockText}</span>
+        {/* Full-Screen Live Heart Pulse Alert Overlay */}
+        {showPulseOverlay && room && (
+          <div
+            onClick={() => setShowPulseOverlay(false)}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-4 cursor-pointer"
+          >
+            <div className="relative w-full max-w-sm rounded-3xl bg-slate-900/95 border border-rose-500 p-6 text-center shadow-2xl shadow-rose-500/30">
+              <div className="relative w-20 h-20 mx-auto mb-4 flex items-center justify-center">
+                <div className="absolute inset-0 rounded-full bg-rose-500/40 animate-pulse-ring" />
+                <div className="relative w-16 h-16 rounded-full bg-gradient-to-br from-rose-500 to-amber-500 flex items-center justify-center shadow-xl">
+                  <Heart className="w-8 h-8 text-white fill-white" />
+                </div>
               </div>
-
-              <PWAInstallButton />
-
+              <p className="text-xs font-bold text-amber-400 mb-1">
+                وصلتك نبضة شوق حية من {room.lastPulseFromName}
+              </p>
+              <h3 className="text-lg font-bold text-white font-display mb-4 leading-relaxed whitespace-normal break-words">
+                «{room.lastPulseMessage || 'أشتاق إليك في هذه اللحظة!'}»
+              </h3>
               <button
                 type="button"
-                onClick={() => setIsUnlocked(false)}
-                title="قفل الشاشة برمز الحماية (PIN)"
-                className="min-h-[40px] min-w-[40px] rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-rose-500/40 text-slate-300 hover:text-rose-300 flex items-center justify-center transition-colors cursor-pointer"
+                onClick={() => setShowPulseOverlay(false)}
+                className="w-full min-h-[44px] rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs transition-colors cursor-pointer"
               >
-                <Lock className="w-4 h-4" />
+                استلمت النبضة بحب
               </button>
+            </div>
+          </div>
+        )}
+
+        {/* Compact Mobile Header: Brand / Partner Switcher, Live 12-Hour Clock, Settings Gear, & Stealth Lock */}
+        <header className="relative z-20 bg-slate-950/80 backdrop-blur-md border-b border-rose-500/25 px-3 sm:px-6 py-2 shrink-0">
+          <div className="max-w-5xl mx-auto flex items-center justify-between gap-2">
+            {/* Left/Right: Brand & Quick Partner Role Switcher */}
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="flex items-center gap-1.5">
+                <Heart className="w-4 h-4 text-rose-500 fill-rose-500 shrink-0" />
+                <span className="text-sm sm:text-base font-bold text-white font-display">
+                  نبض القلوب
+                </span>
+              </div>
 
               {room && (
                 <button
                   type="button"
-                  onClick={handleLeaveRoom}
-                  title="تغيير رمز الغرفة"
-                  className="min-h-[40px] min-w-[40px] rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-400 hover:text-amber-300 flex items-center justify-center transition-colors cursor-pointer"
+                  onClick={() =>
+                    handleSwitchRole(
+                      activeRole === 'partner1' ? 'partner2' : 'partner1'
+                    )
+                  }
+                  className="min-h-[36px] px-2.5 py-1 rounded-xl bg-slate-900/90 border border-rose-500/35 text-[11px] font-bold text-rose-200 hover:border-rose-400 transition-colors cursor-pointer"
+                  title="اضغط للتبديل بين الشريكين"
                 >
-                  <LogOut className="w-4 h-4" />
+                  {activeRole === 'partner1'
+                    ? `${room.partner1Name} (${room.partner1Points}★)`
+                    : `${room.partner2Name} (${room.partner2Points}★)`}
                 </button>
               )}
+            </div>
+
+            {/* Right/Left Controls: Live 12-Hour Clock + Settings Gear Icon + Lock Button */}
+            <div className="flex items-center gap-1.5 shrink-0">
+              <div
+                className="flex items-center gap-1 rounded-xl bg-slate-900/90 border border-slate-800 px-2.5 py-1.5 text-[11px] font-mono font-bold text-amber-300 tabular-nums"
+                title="الساعة الرقمية الحية (١٢ ساعة)"
+              >
+                <Clock className="w-3 h-3 text-rose-400 shrink-0" />
+                <span dir="ltr">{clockText}</span>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsSettingsOpen(true)}
+                aria-label="الإعدادات والخلفية المشتركة"
+                className="min-h-[42px] min-w-[42px] rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-rose-500/35 text-amber-300 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+              >
+                <Settings className="w-4 h-4" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setIsUnlocked(false)}
+                aria-label="قفل الشاشة السري"
+                className="min-h-[42px] min-w-[42px] rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-rose-300 flex items-center justify-center transition-colors cursor-pointer"
+              >
+                <Lock className="w-4 h-4" />
+              </button>
             </div>
           </div>
         </header>
 
-        {/* Live Synchronized Notification Toast */}
+        {/* Live Toast Banner */}
         {liveToast && (
-          <div className="fixed top-18 right-4 left-4 sm:left-auto sm:max-w-md z-40 rounded-2xl bg-slate-900/95 backdrop-blur-md border border-rose-500 px-4 py-3 shadow-2xl shadow-rose-500/20 flex items-center gap-3">
-            <Heart className="w-5 h-5 text-rose-400 fill-rose-400 shrink-0" />
-            <p className="text-xs font-semibold text-white leading-relaxed">
+          <div className="fixed top-14 right-3 left-3 sm:left-auto sm:max-w-sm z-40 rounded-2xl bg-slate-900/95 backdrop-blur-md border border-rose-500 px-3.5 py-2.5 shadow-2xl flex items-center gap-2.5">
+            <Heart className="w-4 h-4 text-rose-400 fill-rose-400 shrink-0" />
+            <p className="text-xs font-semibold text-white leading-relaxed whitespace-normal break-words">
               {liveToast}
             </p>
           </div>
         )}
 
-        {/* Main Workspace Container */}
-        <main className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-8 py-6 space-y-6 relative z-10">
+        {/* Active Full-Screen Tab Content Area (Strictly bounded inside 100dvh) */}
+        <main className="relative z-10 flex-1 min-h-0 w-full max-w-5xl mx-auto px-3 sm:px-6 py-2.5 overflow-hidden">
           {!user || !room ? (
             <RoomPairingModal
               user={user}
@@ -1060,74 +1200,7 @@ export default function App() {
               isSubmitting={isSubmittingRoom}
             />
           ) : (
-            <>
-              {/* Always-Visible Live Mood & Send a Pulse Bar */}
-              <MoodAndPulseBar
-                room={room}
-                activeRole={activeRole}
-                onSwitchRole={handleSwitchRole}
-                onUpdateMood={handleUpdateMood}
-                onSendPulse={handleSendPulse}
-                showPulseOverlay={showPulseOverlay}
-                onDismissPulseOverlay={() => setShowPulseOverlay(false)}
-              />
-
-              {/* Mobile / Tablet Feature Switcher Tabs */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 p-1.5 rounded-2xl bg-slate-900/90 backdrop-blur-md border border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('goals')}
-                  className={`min-h-[44px] rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all whitespace-nowrap shrink-0 cursor-pointer ${
-                    activeTab === 'goals'
-                      ? 'bg-gradient-to-r from-rose-600 to-amber-600 text-white shadow-md shadow-rose-600/20'
-                      : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <Target className="w-4 h-4 shrink-0" />
-                  <span>الأهداف المكتوبة ({goals.length})</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('cards')}
-                  className={`min-h-[44px] rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all whitespace-nowrap shrink-0 cursor-pointer ${
-                    activeTab === 'cards'
-                      ? 'bg-gradient-to-r from-rose-600 to-amber-600 text-white shadow-md shadow-rose-600/20'
-                      : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <Layers className="w-4 h-4 shrink-0" />
-                  <span>بطاقات التحدي (3D)</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('wheel')}
-                  className={`min-h-[44px] rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all whitespace-nowrap shrink-0 cursor-pointer ${
-                    activeTab === 'wheel'
-                      ? 'bg-gradient-to-r from-rose-600 to-amber-600 text-white shadow-md shadow-rose-600/20'
-                      : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <Compass className="w-4 h-4 shrink-0" />
-                  <span>عجلة الحظ المشتركة</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('rewards')}
-                  className={`min-h-[44px] rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all whitespace-nowrap shrink-0 cursor-pointer ${
-                    activeTab === 'rewards'
-                      ? 'bg-gradient-to-r from-rose-600 to-amber-600 text-white shadow-md shadow-rose-600/20'
-                      : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <Gift className="w-4 h-4 shrink-0" />
-                  <span>متجر المكافآت ({rewards.length})</span>
-                </button>
-              </div>
-
-              {/* Active Feature View */}
+            <div className="h-full w-full overflow-hidden">
               {activeTab === 'goals' && (
                 <WrittenGoalsBoard
                   room={room}
@@ -1163,6 +1236,8 @@ export default function App() {
                   activeRole={activeRole}
                   onSpinWheel={handleSpinWheel}
                   onUpdateWheelOptions={handleUpdateWheelOptions}
+                  onUpdateMood={handleUpdateMood}
+                  onSendPulse={handleSendPulse}
                 />
               )}
 
@@ -1177,19 +1252,108 @@ export default function App() {
                   onDeleteReward={handleDeleteReward}
                 />
               )}
-            </>
+            </div>
           )}
         </main>
 
-        {/* Subtle Clean Developer Credit Footer */}
-        <footer className="border-t border-slate-800/80 bg-slate-950/60 py-4 px-6 text-center relative z-10">
-          <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-400">
-            <span>نبض القلوب — مساحة تفاعلية خاصة ومشفرة للزوجين</span>
-            <span dir="ltr" className="font-mono text-slate-400">
-              Developed by Amir Lamay • Made In Egypt
-            </span>
+        {/* Bottom Dock: Developer Credit Line + Fixed 4-Tab Mobile Navigation Bar */}
+        <div className="relative z-20 bg-slate-950/90 backdrop-blur-md border-t border-rose-500/25 shrink-0">
+          {/* Compact Single-Line Developer Credit neatly above Bottom Nav Bar */}
+          <div
+            dir="ltr"
+            className="text-center py-1 text-[10px] font-mono text-slate-400 border-b border-slate-800/60"
+          >
+            Developed by Amir Lamay • Made In Egypt
           </div>
-        </footer>
+
+          {/* 4 Full-Screen Mobile Tabs Bar */}
+          {room && (
+            <nav className="max-w-5xl mx-auto grid grid-cols-4 gap-1 px-2 py-1.5">
+              <button
+                type="button"
+                onClick={() => setActiveTab('goals')}
+                className={`min-h-[48px] rounded-xl flex flex-col items-center justify-center gap-0.5 transition-all cursor-pointer ${
+                  activeTab === 'goals'
+                    ? 'bg-gradient-to-t from-rose-600/30 to-amber-500/20 border border-rose-500/50 text-white font-bold'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Target
+                  className={`w-4 h-4 ${
+                    activeTab === 'goals' ? 'text-rose-400' : ''
+                  }`}
+                />
+                <span className="text-[11px] leading-tight">الأهداف</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab('cards')}
+                className={`min-h-[48px] rounded-xl flex flex-col items-center justify-center gap-0.5 transition-all cursor-pointer ${
+                  activeTab === 'cards'
+                    ? 'bg-gradient-to-t from-rose-600/30 to-amber-500/20 border border-rose-500/50 text-white font-bold'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Layers
+                  className={`w-4 h-4 ${
+                    activeTab === 'cards' ? 'text-amber-400' : ''
+                  }`}
+                />
+                <span className="text-[11px] leading-tight">البطاقات</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab('wheel')}
+                className={`min-h-[48px] rounded-xl flex flex-col items-center justify-center gap-0.5 transition-all cursor-pointer ${
+                  activeTab === 'wheel'
+                    ? 'bg-gradient-to-t from-rose-600/30 to-amber-500/20 border border-rose-500/50 text-white font-bold'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Compass
+                  className={`w-4 h-4 ${
+                    activeTab === 'wheel' ? 'text-rose-400' : ''
+                  }`}
+                />
+                <span className="text-[11px] leading-tight">العجلة والمزاج</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab('rewards')}
+                className={`min-h-[48px] rounded-xl flex flex-col items-center justify-center gap-0.5 transition-all cursor-pointer ${
+                  activeTab === 'rewards'
+                    ? 'bg-gradient-to-t from-rose-600/30 to-amber-500/20 border border-rose-500/50 text-white font-bold'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Gift
+                  className={`w-4 h-4 ${
+                    activeTab === 'rewards' ? 'text-amber-400' : ''
+                  }`}
+                />
+                <span className="text-[11px] leading-tight">المكافآت</span>
+              </button>
+            </nav>
+          )}
+        </div>
+
+        {/* Settings Modal (Shared Background Upload, Dimming Slider, Reset, Change PIN) */}
+        <SettingsModal
+          isOpen={isSettingsOpen}
+          onClose={() => setIsSettingsOpen(false)}
+          room={room}
+          activeRole={activeRole}
+          onSwitchRole={handleSwitchRole}
+          onUploadBackground={handleUploadBackground}
+          onUpdateOverlayOpacity={handleUpdateOverlayOpacity}
+          onResetBackground={handleResetBackground}
+          currentPin={savedPin}
+          onChangePin={handleChangePin}
+          onLeaveRoom={handleLeaveRoom}
+        />
 
         <OfflineIndicator />
       </div>

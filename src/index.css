@@ -8,14 +8,26 @@
     --font-mono: 'JetBrains Mono', monospace;
   }
 
-  html {
+  html,
+  body,
+  #root {
     font-family: var(--font-sans);
-    background-color: #0f172a;
+    background-color: #090d16;
     color: #f8fafc;
     direction: rtl;
+    height: 100dvh;
+    width: 100vw;
+    overflow: hidden;
+    overscroll-behavior: none;
+    margin: 0;
+    padding: 0;
   }
 
-  h1, h2, h3, h4, .font-display {
+  h1,
+  h2,
+  h3,
+  h4,
+  .font-display {
     font-family: var(--font-display);
   }
 
@@ -25,6 +37,21 @@
   select {
     font-size: 16px !important;
   }
+}
+
+/* Custom thin scrollbar for internal card lists inside the 100dvh frame */
+.custom-scroll::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+.custom-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scroll::-webkit-scrollbar-thumb {
+  background: rgba(244, 63, 94, 0.35);
+  border-radius: 9999px;
 }
 
 /* 3D Card Flip Utilities */
@@ -63,4 +90,14 @@
 
 .animate-pulse-ring {
   animation: pulse-ring 1.8s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+}
+
+@keyframes shake-error {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-8px); }
+  40%, 80% { transform: translateX(8px); }
+}
+
+.animate-shake {
+  animation: shake-error 0.35s ease-in-out;
 }

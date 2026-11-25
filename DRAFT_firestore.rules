@@ -47,7 +47,8 @@ service cloud.firestore {
         'activeCardId', 'activeCardTitle', 'activeCardText', 'activeCardLevel',
         'activeCardPoints', 'activeCardDrawnBy', 'activeCardFlipped', 'activeCardStage',
         'wheelOptions', 'wheelSpinAngle', 'wheelSpinning', 'wheelWinner',
-        'wheelSpunBy', 'wheelSpinTimestamp', 'createdAt', 'updatedAt'
+        'wheelSpunBy', 'wheelSpinTimestamp', 'bgUrl', 'bgType', 'bgOverlayOpacity',
+        'createdAt', 'updatedAt'
       ]) &&
       data.keys().hasOnly([
         'code', 'ownerId', 'partner1Name', 'partner1Mood', 'partner1Points',
@@ -56,7 +57,8 @@ service cloud.firestore {
         'activeCardId', 'activeCardTitle', 'activeCardText', 'activeCardLevel',
         'activeCardPoints', 'activeCardDrawnBy', 'activeCardFlipped', 'activeCardStage',
         'wheelOptions', 'wheelSpinAngle', 'wheelSpinning', 'wheelWinner',
-        'wheelSpunBy', 'wheelSpinTimestamp', 'createdAt', 'updatedAt'
+        'wheelSpunBy', 'wheelSpinTimestamp', 'bgUrl', 'bgType', 'bgOverlayOpacity',
+        'createdAt', 'updatedAt'
       ]) &&
       data.code is string && data.code.size() >= 4 && data.code.size() <= 20 && data.code == roomId &&
       data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 &&
@@ -88,6 +90,10 @@ service cloud.firestore {
       data.wheelWinner is string && data.wheelWinner.size() >= 0 && data.wheelWinner.size() <= 120 &&
       data.wheelSpunBy is string && data.wheelSpunBy.size() >= 0 && data.wheelSpunBy.size() <= 60 &&
       data.wheelSpinTimestamp is int && data.wheelSpinTimestamp >= 0 &&
+      data.bgUrl is string && data.bgUrl.size() >= 0 && data.bgUrl.size() <= 800000 &&
+      data.bgType is string && data.bgType.size() >= 4 && data.bgType.size() <= 10 &&
+      data.bgType in ['none', 'image', 'video'] &&
+      data.bgOverlayOpacity is int && data.bgOverlayOpacity >= 20 && data.bgOverlayOpacity <= 90 &&
       data.createdAt is timestamp &&
       data.updatedAt is timestamp;
     }
@@ -174,9 +180,30 @@ service cloud.firestore {
       data.updatedAt is timestamp;
     }
 
+    function isValidMediaChunk(data, roomId) {
+      return data.keys().hasAll([
+        'roomId', 'authorId', 'index', 'total', 'mimeType', 'data',
+        'memberUids', 'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'roomId', 'authorId', 'index', 'total', 'mimeType', 'data',
+        'memberUids', 'createdAt', 'updatedAt'
+      ]) &&
+      data.roomId is string && data.roomId.size() >= 4 && data.roomId.size() <= 20 && data.roomId == roomId &&
+      data.authorId is string && data.authorId.size() >= 1 && data.authorId.size() <= 128 &&
+      data.index is int && data.index >= 0 && data.index <= 25 &&
+      data.total is int && data.total >= 1 && data.total <= 25 &&
+      data.mimeType is string && data.mimeType.size() >= 3 && data.mimeType.size() <= 80 &&
+      data.data is string && data.data.size() >= 1 && data.data.size() <= 750000 &&
+      data.memberUids is list && data.memberUids.size() >= 1 && data.memberUids.size() <= 2 &&
+      data.memberUids[0] is string && data.memberUids[0].size() >= 1 && data.memberUids[0].size() <= 128 &&
+      request.auth.uid in data.memberUids &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
     // 4. Collection Match Blocks
     match /rooms/{roomId} {
-      // Allow single-document get if room does not exist yet (availability check), or caller is Partner 1, Partner 2, or room is open for Partner 2
       allow get: if isVerifiedUser() && isValidRoomCode(roomId) && (
         resource == null ||
         existing().ownerId == request.auth.uid ||
@@ -244,6 +271,12 @@ service cloud.firestore {
             (existing().ownerId == request.auth.uid || existing().partner2Id == request.auth.uid) &&
             incoming().partner2Id == existing().partner2Id &&
             incoming().diff(existing()).affectedKeys().hasOnly(['partner1Points', 'partner2Points', 'updatedAt'])
+          ) ||
+          // Action 7: Current room member updates shared live background media or overlay opacity
+          (
+            (existing().ownerId == request.auth.uid || existing().partner2Id == request.auth.uid) &&
+            incoming().partner2Id == existing().partner2Id &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['bgUrl', 'bgType', 'bgOverlayOpacity', 'updatedAt'])
           )
         );
 
@@ -274,22 +307,18 @@ service cloud.firestore {
           incoming().authorRole == existing().authorRole &&
           incoming().createdAt == existing().createdAt &&
           incoming().updatedAt == request.time && (
-            // Action 1: Partner reveals hidden goal
             (
               incoming().isRevealed == true &&
               incoming().diff(existing()).affectedKeys().hasOnly(['isRevealed', 'updatedAt'])
             ) ||
-            // Action 2: Partner marks goal as completed
             (
               incoming().status == 'completed' &&
               incoming().isRevealed == true &&
               incoming().diff(existing()).affectedKeys().hasOnly(['status', 'isRevealed', 'updatedAt'])
             ) ||
-            // Action 3: Room member attaches/updates reward points or syncs memberUids
             (
               incoming().diff(existing()).affectedKeys().hasOnly(['rewardPoints', 'memberUids', 'updatedAt'])
             ) ||
-            // Action 4: Author edits goal content or timeframe
             (
               existing().authorId == request.auth.uid &&
               incoming().diff(existing()).affectedKeys().hasOnly(['content', 'timeframe', 'rewardPoints', 'isRevealed', 'memberUids', 'updatedAt'])
@@ -366,12 +395,10 @@ service cloud.firestore {
           incoming().authorId == existing().authorId &&
           incoming().createdAt == existing().createdAt &&
           incoming().updatedAt == request.time && (
-            // Action 1: Redeem reward (increment redeemedCount)
             (
               incoming().redeemedCount == existing().redeemedCount + 1 &&
               incoming().diff(existing()).affectedKeys().hasOnly(['redeemedCount', 'lastRedeemedBy', 'updatedAt'])
             ) ||
-            // Action 2: Sync memberUids when Partner 2 joins
             (
               incoming().diff(existing()).affectedKeys().hasOnly(['memberUids', 'updatedAt'])
             )
@@ -382,6 +409,36 @@ service cloud.firestore {
           isValidRoomCode(roomId) &&
           isValidId(rewardId) &&
           existing().authorId == request.auth.uid &&
+          isRoomMember(roomId);
+      }
+
+      // Subcollection 4: Synchronized Background Media Chunks (for video/GIF dual-screen sync)
+      match /media/{chunkId} {
+        allow get: if isVerifiedUser() && isValidRoomCode(roomId) && isValidId(chunkId) && isRoomMember(roomId);
+        allow list: if isVerifiedUser() && request.auth.uid in existing().memberUids;
+
+        allow create: if isVerifiedUser() &&
+          isValidRoomCode(roomId) &&
+          isValidId(chunkId) &&
+          isValidMediaChunk(incoming(), roomId) &&
+          incoming().authorId == request.auth.uid &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          isRoomMember(roomId);
+
+        allow update: if isVerifiedUser() &&
+          isValidRoomCode(roomId) &&
+          isValidId(chunkId) &&
+          isValidMediaChunk(incoming(), roomId) &&
+          incoming().roomId == existing().roomId &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['data', 'index', 'total', 'mimeType', 'authorId', 'memberUids', 'updatedAt']) &&
+          isRoomMember(roomId);
+
+        allow delete: if isVerifiedUser() &&
+          isValidRoomCode(roomId) &&
+          isValidId(chunkId) &&
           isRoomMember(roomId);
       }
     }

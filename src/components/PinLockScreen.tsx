@@ -1,196 +1,216 @@
-import React, { useState } from 'react';
-import { Delete, HeartHandshake, KeyRound, Lock, ShieldCheck, Unlock } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Delete, RotateCcw } from 'lucide-react';
 import { triggerActionChime } from '../firebase';
 
 interface PinLockScreenProps {
-  savedPin: string | null;
-  onUnlock: (pin: string) => void;
-  onResetPin: () => void;
+  savedPin: string;
+  onUnlock: () => void;
 }
 
+interface FloatingParticle {
+  x: number;
+  y: number;
+  size: number;
+  speedY: number;
+  driftX: number;
+  phase: number;
+  opacity: number;
+  symbol: string;
+}
+
+const SYMBOLS = ['❤️', '💖', '💕', '💋', '❤️', '💋', '💖'];
+
+/**
+ * Ultra-Private Stealth Lock Screen:
+ * - ZERO text titles, ZERO app descriptions, ZERO hints about the app's content.
+ * - Full-screen 100dvh non-scrollable canvas of floating glowing hearts (❤️, 💖, 💕) and kisses (💋) on #090d16.
+ * - Minimalist 4 circular dot indicators + semi-transparent glassmorphic numeric keypad (0–9).
+ */
 export const PinLockScreen: React.FC<PinLockScreenProps> = ({
   savedPin,
   onUnlock,
-  onResetPin,
 }) => {
   const [digits, setDigits] = useState<string>('');
-  const [error, setError] = useState<string>('');
-  const [confirmReset, setConfirmReset] = useState(false);
+  const [hasError, setHasError] = useState<boolean>(false);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  const isSettingNewPin = !savedPin;
+  // Continuous HTML5 Canvas Floating Hearts & Kisses Particle Engine
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    let animationFrameId: number;
+    let width = (canvas.width = window.innerWidth);
+    let height = (canvas.height = window.innerHeight);
+
+    const handleResize = () => {
+      if (!canvas) return;
+      width = canvas.width = window.innerWidth;
+      height = canvas.height = window.innerHeight;
+    };
+    window.addEventListener('resize', handleResize);
+
+    const count = Math.min(34, Math.max(18, Math.floor(width / 26)));
+    const particles: FloatingParticle[] = Array.from({ length: count }, () => ({
+      x: Math.random() * width,
+      y: Math.random() * height,
+      size: 16 + Math.random() * 18,
+      speedY: 0.45 + Math.random() * 0.9,
+      driftX: 0.35 + Math.random() * 0.65,
+      phase: Math.random() * Math.PI * 2,
+      opacity: 0.25 + Math.random() * 0.6,
+      symbol: SYMBOLS[Math.floor(Math.random() * SYMBOLS.length)],
+    }));
+
+    const render = () => {
+      ctx.clearRect(0, 0, width, height);
+
+      for (const p of particles) {
+        p.y -= p.speedY;
+        p.phase += 0.015;
+        const currentX = p.x + Math.sin(p.phase) * 18 * p.driftX;
+
+        if (p.y < -40) {
+          p.y = height + 30;
+          p.x = Math.random() * width;
+        }
+
+        ctx.save();
+        ctx.globalAlpha = p.opacity;
+        ctx.font = `${Math.round(p.size)}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.shadowColor = 'rgba(244, 63, 94, 0.55)';
+        ctx.shadowBlur = 14;
+        ctx.fillText(p.symbol, currentX, p.y);
+        ctx.restore();
+      }
+
+      animationFrameId = requestAnimationFrame(render);
+    };
+
+    render();
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      cancelAnimationFrame(animationFrameId);
+    };
+  }, []);
+
+  const targetPin = savedPin && savedPin.length === 4 ? savedPin : '0000';
 
   const handleDigitPress = (digit: string) => {
-    setError('');
+    setHasError(false);
     if (digits.length >= 4) return;
     const next = digits + digit;
     setDigits(next);
 
     if (next.length === 4) {
-      if (isSettingNewPin) {
+      if (next === targetPin) {
         triggerActionChime();
-        onUnlock(next);
-      } else if (next === savedPin) {
-        triggerActionChime();
-        onUnlock(next);
+        onUnlock();
       } else {
-        setError('رمز الحماية غير صحيح، حاول مرة أخرى');
-        setTimeout(() => setDigits(''), 350);
+        setHasError(true);
+        if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+          navigator.vibrate([80, 50, 80]);
+        }
+        setTimeout(() => {
+          setDigits('');
+          setHasError(false);
+        }, 420);
       }
     }
   };
 
   const handleBackspace = () => {
-    setError('');
+    setHasError(false);
     setDigits((prev) => prev.slice(0, -1));
   };
 
-  const handleQuickDemoPin = () => {
-    triggerActionChime();
-    onUnlock(savedPin || '1234');
+  const handleClear = () => {
+    setHasError(false);
+    setDigits('');
   };
 
   return (
     <div
-      dir="rtl"
-      className="min-h-screen bg-[#0f172a] text-slate-100 flex flex-col items-center justify-center p-4 relative overflow-hidden"
+      dir="ltr"
+      className="fixed inset-0 h-[100dvh] w-screen overflow-hidden bg-[#090d16] flex flex-col items-center justify-center p-4 select-none"
     >
-      {/* Subtle ambient glow */}
-      <div className="pointer-events-none absolute -top-32 right-1/4 w-96 h-96 rounded-full bg-rose-500/10 blur-3xl" />
-      <div className="pointer-events-none absolute -bottom-32 left-1/4 w-96 h-96 rounded-full bg-amber-500/10 blur-3xl" />
+      {/* Background Canvas of Floating Glowing Hearts & Kisses */}
+      <canvas
+        ref={canvasRef}
+        className="pointer-events-none absolute inset-0 w-full h-full z-0"
+      />
 
-      <div className="w-full max-w-md rounded-3xl bg-slate-900/80 backdrop-blur-md border border-rose-500/30 p-6 sm:p-8 shadow-2xl relative z-10">
-        <div className="flex flex-col items-center text-center mb-6">
-          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-rose-500/20 to-amber-500/20 border border-rose-500/40 flex items-center justify-center mb-4 shadow-lg shadow-rose-500/10">
-            {isSettingNewPin ? (
-              <KeyRound className="w-7 h-7 text-amber-400" />
-            ) : (
-              <Lock className="w-7 h-7 text-rose-400" />
-            )}
-          </div>
-          <h1 className="text-2xl font-bold text-white font-display tracking-tight">
-            {isSettingNewPin ? 'إعداد رمز الخصوصية (PIN)' : 'قفل الخصوصية للزوجين'}
-          </h1>
-          <p className="text-sm text-slate-400 mt-1.5 max-w-xs leading-relaxed">
-            {isSettingNewPin
-              ? 'اختر رمزاً سرياً من ٤ أرقام لحماية مساحتكما الخاصة على هذا الجهاز'
-              : 'أدخل رمز الحماية المكون من ٤ أرقام للدخول إلى مساحتكما الخاصة'}
-          </p>
-        </div>
+      {/* Ambient Subtle Radial Glow */}
+      <div className="pointer-events-none absolute w-80 h-80 rounded-full bg-rose-500/10 blur-3xl z-0" />
 
-        {/* 4-Digit Indicator Slots */}
-        <div className="flex items-center justify-center gap-3.5 my-6" dir="ltr">
+      {/* Minimalist PIN Pad Container — ZERO text titles or hints */}
+      <div className="relative z-10 w-full max-w-[290px] rounded-3xl bg-slate-900/45 backdrop-blur-xl border border-rose-500/25 p-5 shadow-2xl shadow-black/70 flex flex-col items-center">
+        {/* 4 Circular Dot Indicators */}
+        <div
+          className={`flex items-center justify-center gap-4 my-4 ${
+            hasError ? 'animate-shake' : ''
+          }`}
+        >
           {[0, 1, 2, 3].map((index) => {
             const filled = index < digits.length;
             return (
               <div
                 key={index}
-                className={`w-13 h-14 rounded-2xl flex items-center justify-center border text-xl font-bold font-mono transition-all duration-150 ${
-                  filled
-                    ? 'bg-rose-500/20 border-rose-500 text-rose-300 shadow-md shadow-rose-500/15 scale-105'
-                    : 'bg-slate-950/70 border-slate-800 text-slate-600'
+                className={`w-4 h-4 rounded-full transition-all duration-200 ${
+                  hasError
+                    ? 'bg-rose-500 shadow-lg shadow-rose-500/60 scale-110'
+                    : filled
+                    ? 'bg-gradient-to-br from-rose-400 to-amber-400 shadow-md shadow-rose-500/50 scale-110'
+                    : 'bg-white/15 border border-white/25'
                 }`}
-              >
-                {filled ? '•' : ''}
-              </div>
+              />
             );
           })}
         </div>
 
-        {error && (
-          <p className="text-xs text-rose-400 text-center font-medium mb-4">{error}</p>
-        )}
-
-        {/* Numeric Keypad */}
-        <div className="grid grid-cols-3 gap-3 max-w-xs mx-auto" dir="ltr">
+        {/* Sleek Glassmorphic Numeric Keypad (0-9) */}
+        <div className="grid grid-cols-3 gap-2.5 w-full mt-2">
           {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((num) => (
             <button
               key={num}
               type="button"
               onClick={() => handleDigitPress(num)}
-              className="min-h-[54px] rounded-2xl bg-slate-800/70 hover:bg-slate-800 active:scale-95 border border-slate-700/70 hover:border-rose-500/40 text-lg font-bold font-mono text-white transition-all cursor-pointer"
+              className="min-h-[54px] h-14 rounded-2xl bg-white/[0.06] hover:bg-rose-500/20 active:scale-95 border border-white/10 hover:border-rose-400/40 text-xl font-bold font-mono text-white/90 transition-all flex items-center justify-center cursor-pointer"
             >
               {num}
             </button>
           ))}
+
           <button
             type="button"
-            onClick={() => setDigits('')}
-            className="min-h-[54px] rounded-2xl bg-slate-900/70 hover:bg-slate-800/80 border border-slate-800 text-xs font-semibold text-slate-400 hover:text-slate-200 transition-colors cursor-pointer"
+            onClick={handleClear}
+            aria-label="Clear"
+            className="min-h-[54px] h-14 rounded-2xl bg-white/[0.03] hover:bg-white/[0.08] active:scale-95 border border-white/10 text-slate-400 hover:text-white transition-all flex items-center justify-center cursor-pointer"
           >
-            مسح
+            <RotateCcw className="w-5 h-5" />
           </button>
+
           <button
             type="button"
             onClick={() => handleDigitPress('0')}
-            className="min-h-[54px] rounded-2xl bg-slate-800/70 hover:bg-slate-800 active:scale-95 border border-slate-700/70 hover:border-rose-500/40 text-lg font-bold font-mono text-white transition-all cursor-pointer"
+            className="min-h-[54px] h-14 rounded-2xl bg-white/[0.06] hover:bg-rose-500/20 active:scale-95 border border-white/10 hover:border-rose-400/40 text-xl font-bold font-mono text-white/90 transition-all flex items-center justify-center cursor-pointer"
           >
             0
           </button>
+
           <button
             type="button"
             onClick={handleBackspace}
-            aria-label="حذف رقم"
-            className="min-h-[54px] rounded-2xl bg-slate-900/70 hover:bg-slate-800/80 border border-slate-800 flex items-center justify-center text-slate-300 hover:text-rose-300 transition-colors cursor-pointer"
+            aria-label="Backspace"
+            className="min-h-[54px] h-14 rounded-2xl bg-white/[0.03] hover:bg-white/[0.08] active:scale-95 border border-white/10 text-slate-400 hover:text-rose-300 transition-all flex items-center justify-center cursor-pointer"
           >
             <Delete className="w-5 h-5" />
           </button>
-        </div>
-
-        {/* Direct Quick Entry / Reset Controls */}
-        <div className="mt-6 pt-5 border-t border-slate-800/80 flex flex-col gap-2.5">
-          <button
-            type="button"
-            onClick={handleQuickDemoPin}
-            className="w-full min-h-[44px] rounded-xl bg-gradient-to-r from-rose-600/20 to-amber-500/20 hover:from-rose-600/30 hover:to-amber-500/30 border border-rose-500/40 text-rose-200 text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer"
-          >
-            <Unlock className="w-4 h-4 text-amber-400" />
-            <span>
-              {isSettingNewPin
-                ? 'تعيين الرمز السريع (1234) والدخول فوراً'
-                : 'فتح القفل السريع للمعاينة'}
-            </span>
-          </button>
-
-          {!isSettingNewPin && (
-            <div className="text-center">
-              {!confirmReset ? (
-                <button
-                  type="button"
-                  onClick={() => setConfirmReset(true)}
-                  className="text-xs text-slate-400 hover:text-amber-300 transition-colors py-1 cursor-pointer"
-                >
-                  نسيت رمز الحماية؟ إعادة تعيين الرمز المحلي
-                </button>
-              ) : (
-                <div className="flex items-center justify-center gap-3 mt-1">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onResetPin();
-                      setConfirmReset(false);
-                      setDigits('');
-                    }}
-                    className="text-xs text-rose-400 font-semibold hover:underline cursor-pointer"
-                  >
-                    تأكيد إعادة التعيين
-                  </button>
-                  <span className="text-slate-600">·</span>
-                  <button
-                    type="button"
-                    onClick={() => setConfirmReset(false)}
-                    className="text-xs text-slate-400 hover:text-slate-200 cursor-pointer"
-                  >
-                    إلغاء
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        <div className="mt-4 flex items-center justify-center gap-1.5 text-[11px] text-slate-400">
-          <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
-          <span>مشفر ومحمي بخصوصية تامة بين جهازيكما فقط</span>
         </div>
       </div>
     </div>

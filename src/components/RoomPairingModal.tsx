@@ -4,7 +4,6 @@ import {
   Check,
   Copy,
   Heart,
-  KeyRound,
   Link2,
   LogIn,
   Sparkles,
@@ -77,75 +76,74 @@ export const RoomPairingModal: React.FC<RoomPairingModalProps> = ({
   };
 
   return (
-    <div className="w-full max-w-xl mx-auto my-8 px-4">
-      <div className="rounded-3xl bg-slate-900/85 backdrop-blur-md border border-rose-500/30 p-6 sm:p-8 shadow-2xl">
-        <div className="flex items-center gap-3.5 mb-6">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-rose-500/25 to-amber-500/25 border border-rose-500/40 flex items-center justify-center shrink-0">
-            <Link2 className="w-6 h-6 text-rose-400" />
+    <div className="h-full flex items-center justify-center px-2 overflow-y-auto custom-scroll">
+      <div className="w-full max-w-md rounded-3xl bg-slate-900/90 backdrop-blur-md border border-rose-500/35 p-5 sm:p-6 shadow-2xl">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-rose-500/25 to-amber-500/25 border border-rose-500/40 flex items-center justify-center shrink-0">
+            <Link2 className="w-5 h-5 text-rose-400" />
           </div>
           <div>
-            <h2 className="text-xl font-bold text-white font-display">
-              ربط جهازين برمز الغرفة الخاص
+            <h2 className="text-base sm:text-lg font-bold text-white font-display">
+              ربط الجهازين برمز الغرفة الخاص
             </h2>
-            <p className="text-xs text-slate-400 mt-0.5">
-              مزامنة فورية (Real-Time) لجميع الأهداف المكتوبة، البطاقات، عجلة الحظ، ونبضات الشوق
+            <p className="text-xs text-slate-400 leading-relaxed">
+              مزامنة لحظية للخلفية، الأهداف، البطاقات، والعجلة
             </p>
           </div>
         </div>
 
         {!user ? (
-          <div className="rounded-2xl bg-slate-950/70 border border-slate-800 p-6 text-center">
-            <Heart className="w-10 h-10 text-rose-400 mx-auto mb-3" />
-            <h3 className="text-base font-bold text-white font-display mb-1.5">
-              تسجيل الدخول الآمن لتفعيل المزامنة اللحظية
+          <div className="rounded-2xl bg-slate-950/75 border border-slate-800 p-5 text-center space-y-3">
+            <Heart className="w-9 h-9 text-rose-400 mx-auto" />
+            <h3 className="text-sm sm:text-base font-bold text-white font-display">
+              تسجيل الدخول لتفعيل المزامنة بين الشاشتين
             </h3>
-            <p className="text-xs text-slate-400 leading-relaxed mb-5 max-w-md mx-auto">
-              يرجى تسجيل الدخول بحساب Google لتشفير غرفتكما الخاصة وحفظ الأهداف والبطاقات والمكافآت في قاعدة بيانات Firebase اللحظية.
+            <p className="text-xs text-slate-400 leading-relaxed whitespace-normal break-words">
+              سجّل الدخول بحساب Google لربط هاتفك بهاتف شريكك ومزامنة الصور والفيديوهات والأهداف لحظياً.
             </p>
             <button
               type="button"
               disabled={authLoading}
               onClick={onGoogleSignIn}
-              className="w-full min-h-[48px] rounded-xl bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-bold text-sm flex items-center justify-center gap-2.5 shadow-lg shadow-rose-600/20 transition-all cursor-pointer disabled:opacity-50"
+              className="w-full min-h-[48px] rounded-xl bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-bold text-sm flex items-center justify-center gap-2 shadow-lg cursor-pointer disabled:opacity-50"
             >
-              <LogIn className="w-4 h-4" />
+              <LogIn className="w-4 h-4 shrink-0" />
               <span>{authLoading ? 'جاري الاتصال...' : 'تسجيل الدخول عبر Google'}</span>
             </button>
           </div>
         ) : (
           <>
-            {/* Mode Switcher */}
-            <div className="grid grid-cols-2 gap-2 p-1.5 rounded-2xl bg-slate-950/80 border border-slate-800 mb-6">
+            <div className="grid grid-cols-2 gap-2 p-1 rounded-2xl bg-slate-950 border border-slate-800 mb-4">
               <button
                 type="button"
                 onClick={() => setMode('create')}
                 className={`min-h-[44px] rounded-xl text-xs font-bold transition-all cursor-pointer ${
                   mode === 'create'
-                    ? 'bg-rose-600 text-white shadow-md shadow-rose-600/25'
+                    ? 'bg-rose-600 text-white shadow-md'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                إنشاء غرفة جديدة للزوجين
+                إنشاء غرفة جديدة
               </button>
               <button
                 type="button"
                 onClick={() => setMode('join')}
                 className={`min-h-[44px] rounded-xl text-xs font-bold transition-all cursor-pointer ${
                   mode === 'join'
-                    ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/25'
+                    ? 'bg-amber-500 text-slate-950 shadow-md'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                الانضمام برمز غرفة الشريك
+                الانضمام برمز الشريك
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form onSubmit={handleSubmit} className="space-y-3.5">
               {mode === 'create' ? (
                 <>
                   <div>
-                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                      رمز الغرفة الخاص بكما (شاركه مع شريكك فقط)
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                      رمز الغرفة الخاص بكما (شاركه مع شريكك)
                     </label>
                     <div className="flex items-center gap-2">
                       <input
@@ -160,13 +158,12 @@ export const RoomPairingModal: React.FC<RoomPairingModalProps> = ({
                           )
                         }
                         dir="ltr"
-                        className="flex-1 min-h-[48px] rounded-xl bg-slate-950 border border-rose-500/40 px-4 text-center font-mono font-bold tracking-widest text-amber-300 focus:outline-none focus:border-rose-400"
-                        placeholder="LOVE26"
+                        className="flex-1 min-h-[46px] rounded-xl bg-slate-950 border border-rose-500/40 px-3 text-center font-mono font-bold tracking-widest text-amber-300 focus:outline-none focus:border-rose-400"
                       />
                       <button
                         type="button"
                         onClick={handleCopyCode}
-                        className="min-h-[48px] px-4 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-slate-200 flex items-center gap-1.5 shrink-0 cursor-pointer"
+                        className="min-h-[46px] px-3.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-slate-200 flex items-center gap-1.5 shrink-0 cursor-pointer"
                       >
                         {copied ? (
                           <>
@@ -176,17 +173,17 @@ export const RoomPairingModal: React.FC<RoomPairingModalProps> = ({
                         ) : (
                           <>
                             <Copy className="w-4 h-4 text-rose-400" />
-                            <span>نسخ الرمز</span>
+                            <span>نسخ</span>
                           </>
                         )}
                       </button>
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="grid grid-cols-2 gap-2.5">
                     <div>
-                      <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                        اسمك (أو لقب الدلع)
+                      <label className="block text-xs font-semibold text-slate-300 mb-1">
+                        اسمك (أو لقبك)
                       </label>
                       <input
                         type="text"
@@ -194,13 +191,12 @@ export const RoomPairingModal: React.FC<RoomPairingModalProps> = ({
                         maxLength={60}
                         value={partner1Name}
                         onChange={(e) => setPartner1Name(e.target.value)}
-                        className="w-full min-h-[46px] rounded-xl bg-slate-950 border border-slate-800 px-3.5 text-white focus:outline-none focus:border-rose-500"
-                        placeholder="مثال: أمير"
+                        className="w-full min-h-[44px] rounded-xl bg-slate-950 border border-slate-800 px-3 text-white focus:outline-none focus:border-rose-500"
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                        اسم شريكك (أو لقب الدلع)
+                      <label className="block text-xs font-semibold text-slate-300 mb-1">
+                        اسم شريكك
                       </label>
                       <input
                         type="text"
@@ -208,8 +204,7 @@ export const RoomPairingModal: React.FC<RoomPairingModalProps> = ({
                         maxLength={60}
                         value={partner2Name}
                         onChange={(e) => setPartner2Name(e.target.value)}
-                        className="w-full min-h-[46px] rounded-xl bg-slate-950 border border-slate-800 px-3.5 text-white focus:outline-none focus:border-amber-500"
-                        placeholder="مثال: حبيبتي"
+                        className="w-full min-h-[44px] rounded-xl bg-slate-950 border border-slate-800 px-3 text-white focus:outline-none focus:border-amber-500"
                       />
                     </div>
                   </div>
@@ -217,7 +212,7 @@ export const RoomPairingModal: React.FC<RoomPairingModalProps> = ({
               ) : (
                 <>
                   <div>
-                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">
                       أدخل رمز الغرفة الذي أرسله شريكك
                     </label>
                     <input
@@ -232,13 +227,13 @@ export const RoomPairingModal: React.FC<RoomPairingModalProps> = ({
                         )
                       }
                       dir="ltr"
-                      className="w-full min-h-[48px] rounded-xl bg-slate-950 border border-amber-500/40 px-4 text-center font-mono font-bold tracking-widest text-amber-300 focus:outline-none focus:border-amber-400"
-                      placeholder="أدخل الرمز هنا مثل HB4829"
+                      className="w-full min-h-[46px] rounded-xl bg-slate-950 border border-amber-500/40 px-4 text-center font-mono font-bold tracking-widest text-amber-300 focus:outline-none focus:border-amber-400"
+                      placeholder="HB4829"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                      اسمك أو لقبك في الغرفة
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                      اسمك أو لقبك
                     </label>
                     <input
                       type="text"
@@ -246,15 +241,14 @@ export const RoomPairingModal: React.FC<RoomPairingModalProps> = ({
                       maxLength={60}
                       value={joinName}
                       onChange={(e) => setJoinName(e.target.value)}
-                      className="w-full min-h-[46px] rounded-xl bg-slate-950 border border-slate-800 px-3.5 text-white focus:outline-none focus:border-amber-500"
-                      placeholder="اسمك"
+                      className="w-full min-h-[44px] rounded-xl bg-slate-950 border border-slate-800 px-3 text-white focus:outline-none focus:border-amber-500"
                     />
                   </div>
                 </>
               )}
 
               {errorMsg && (
-                <div className="rounded-xl bg-rose-500/15 border border-rose-500/40 px-4 py-2.5 text-xs text-rose-300 font-medium">
+                <div className="rounded-xl bg-rose-500/15 border border-rose-500/40 px-3.5 py-2 text-xs text-rose-300 font-medium whitespace-normal break-words">
                   {errorMsg}
                 </div>
               )}
@@ -262,24 +256,20 @@ export const RoomPairingModal: React.FC<RoomPairingModalProps> = ({
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="w-full min-h-[50px] rounded-xl bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-rose-600/20 transition-all cursor-pointer disabled:opacity-50"
+                className="w-full min-h-[48px] rounded-xl bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-bold text-sm flex items-center justify-center gap-2 shadow-lg cursor-pointer disabled:opacity-50"
               >
                 {mode === 'create' ? (
                   <>
-                    <Sparkles className="w-4 h-4" />
+                    <Sparkles className="w-4 h-4 shrink-0" />
                     <span>
-                      {isSubmitting
-                        ? 'جاري تجهيز الغرفة والمزامنة...'
-                        : 'إنشاء الغرفة وبدء السهرة الآن'}
+                      {isSubmitting ? 'جاري التجهيز...' : 'إنشاء الغرفة وبدء السهرة'}
                     </span>
                   </>
                 ) : (
                   <>
-                    <Users className="w-4 h-4" />
+                    <Users className="w-4 h-4 shrink-0" />
                     <span>
-                      {isSubmitting
-                        ? 'جاري الربط مع الشريك...'
-                        : 'ربط الجهازين والانضمام للغرفة'}
+                      {isSubmitting ? 'جاري الربط...' : 'ربط الجهازين والانضمام'}
                     </span>
                   </>
                 )}
